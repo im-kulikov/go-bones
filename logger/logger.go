@@ -32,7 +32,6 @@ type logger struct {
 	colored bool
 
 	config  zap.Config
-	sentry  *Sentry
 	options []zap.Option
 
 	*SugaredLogger
@@ -178,17 +177,6 @@ func New(cfg Config, opts ...Option) (Logger, error) {
 
 	if l.appVersion != "" {
 		zapLogger = zapLogger.With(zap.String("version", l.appVersion))
-	}
-
-	if l.sentry == nil {
-		l.SugaredLogger = zapLogger.Sugar()
-
-		return &l, nil
-	}
-
-	// if we had sentry settings we should add sentry zap.Hooks.
-	if zapLogger, err = passSentryToLogger(zapLogger, *l.sentry, l.appVersion); err != nil {
-		return nil, err
 	}
 
 	l.SugaredLogger = zapLogger.Sugar()

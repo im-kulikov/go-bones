@@ -5,7 +5,6 @@ go 1.20
 require (
 	github.com/cristalhq/aconfig v0.18.4
 	github.com/cristalhq/aconfig/aconfigdotenv v0.17.1
-	github.com/getsentry/sentry-go v0.21.0
 	github.com/go-ozzo/ozzo-validation/v4 v4.3.0
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/prometheus/client_golang v1.15.1
@@ -35,6 +34,7 @@ require (
 	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
+	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/prometheus/client_model v0.4.0 // indirect
 	github.com/prometheus/common v0.44.0 // indirect
