@@ -199,8 +199,6 @@ Contains default components configurations and base flags.
 | LOGGER_LEVEL                | false    | info          | allows to set custom logger level              |                                     |
 | LOGGER_TRACE                | false    | fatal         | allows to set custom trace level               |                                     |
 | LOGGER_SAMPLE_RATE          | false    | 1000          | allows to set sample rate                      |                                     |
-| SENTRY_DSN                  | false    |               | allows to set custom sentry DSN                | https://public@sentry.example.com/1 |
-| SENTRY_ENVIRONMENT          | false    |               | allows to set custom sentry environment        | production                          |
 | TRACER_TYPE                 | false    | jaeger        | allows to set trace exporter type              |                                     |
 | TRACER_DISABLE              | false    | false         | allows to disable tracing                      |                                     |
 | TRACER_SAMPLER              | false    | 1             | allows to choose sampler                       |                                     |
