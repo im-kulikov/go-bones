@@ -25,11 +25,6 @@ func WithConsoleColored() Option {
 	return func(l *logger) { l.colored = true }
 }
 
-// WithSentry allows to integrate sentry.
-func WithSentry(v Sentry) Option {
-	return func(l *logger) { l.sentry = &v }
-}
-
 // WithTimeKey allows to set TimeKey for zapcore.EncoderConfig.
 func WithTimeKey(v string) Option {
 	return func(l *logger) { l.config.EncoderConfig.TimeKey = v }

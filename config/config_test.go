@@ -103,7 +103,6 @@ func TestNew(t *testing.T) {
 
 			expect: Base{
 				Shutdown: time.Second * 5,
-				Sentry:   logger.Sentry{},
 				Logger:   logger.Config{Level: "info", Trace: "fatal", SampleRate: &defaultSampleRate},
 				Tracer:   tracer.Config{Type: "jaeger", Jaeger: tracer.Jaeger{Sampler: 1, RetryInterval: time.Second * 15}},
 
@@ -124,7 +123,6 @@ func TestNew(t *testing.T) {
 
 			expect: Base{
 				Shutdown: time.Second * 5,
-				Sentry:   logger.Sentry{},
 				Logger:   logger.Config{Level: "info", Trace: "fatal", SampleRate: &defaultSampleRate},
 				Tracer:   tracer.Config{Type: "jaeger", Jaeger: tracer.Jaeger{Sampler: 1, RetryInterval: time.Second * 15}},
 

@@ -17,7 +17,6 @@ type Base struct {
 
 	Ops    web.OpsConfig `env:"OPS"`
 	Logger logger.Config `env:"LOGGER"`
-	Sentry logger.Sentry `env:"SENTRY"`
 	Tracer tracer.Config `env:"TRACER"`
 }
 

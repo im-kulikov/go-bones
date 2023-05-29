@@ -4,12 +4,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"regexp"
 	"testing"
 
-	"github.com/getsentry/sentry-go"
 	validation "github.com/go-ozzo/ozzo-validation/v4"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -189,29 +187,6 @@ func TestNew(t *testing.T) {
 
 			error:  errors.New("missing EncodeTime in EncoderConfig"),
 			option: []Option{shouldFailOnBuildLogger(), WithConsoleColored()},
-		},
-
-		{
-			name: "should fail on sentry invalid dsn",
-			config: Config{
-				EncodingConsole: true,
-				Level:           zapcore.InfoLevel.String(),
-				Trace:           zapcore.FatalLevel.String(),
-			},
-
-			option: []Option{WithSentry(Sentry{DSN: "unknown", Env: "unknown"})},
-			error:  fmt.Errorf("sentry config: %w", &sentry.DsnParseError{Message: "invalid scheme"}),
-		},
-
-		{
-			name: "should be ok with sentry zap.Hooks",
-			config: Config{
-				EncodingConsole: true,
-				Level:           zapcore.InfoLevel.String(),
-				Trace:           zapcore.FatalLevel.String(),
-			},
-
-			option: []Option{WithSentry(Sentry{DSN: "https://public@sentry.example.com/1", Env: "unknown"})},
 		},
 	}
 
