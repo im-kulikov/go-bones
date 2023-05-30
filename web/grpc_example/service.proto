@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-option go_package="github.com/im-kulikov/go-bones/tracer/grpc_example";
+option go_package="github.com/im-kulikov/go-bones/web/grpc_example;example";
 
 service ExampleGRPCService {
   rpc Ping(PingRequest) returns (PingResponse) {}

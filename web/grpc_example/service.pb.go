@@ -2,16 +2,15 @@
 // versions:
 // 	protoc-gen-go v1.30.0
 // 	protoc        v3.21.12
-// source: tracer/grpc_example/service.proto
+// source: web/grpc_example/service.proto
 
-package grpc_example
+package example
 
 import (
-	reflect "reflect"
-	sync "sync"
-
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	reflect "reflect"
+	sync "sync"
 )
 
 const (
@@ -32,7 +31,7 @@ type PingRequest struct {
 func (x *PingRequest) Reset() {
 	*x = PingRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_tracer_grpc_example_service_proto_msgTypes[0]
+		mi := &file_web_grpc_example_service_proto_msgTypes[0]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -45,7 +44,7 @@ func (x *PingRequest) String() string {
 func (*PingRequest) ProtoMessage() {}
 
 func (x *PingRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tracer_grpc_example_service_proto_msgTypes[0]
+	mi := &file_web_grpc_example_service_proto_msgTypes[0]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -58,7 +57,7 @@ func (x *PingRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PingRequest.ProtoReflect.Descriptor instead.
 func (*PingRequest) Descriptor() ([]byte, []int) {
-	return file_tracer_grpc_example_service_proto_rawDescGZIP(), []int{0}
+	return file_web_grpc_example_service_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *PingRequest) GetName() string {
@@ -79,7 +78,7 @@ type PingResponse struct {
 func (x *PingResponse) Reset() {
 	*x = PingResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_tracer_grpc_example_service_proto_msgTypes[1]
+		mi := &file_web_grpc_example_service_proto_msgTypes[1]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -92,7 +91,7 @@ func (x *PingResponse) String() string {
 func (*PingResponse) ProtoMessage() {}
 
 func (x *PingResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tracer_grpc_example_service_proto_msgTypes[1]
+	mi := &file_web_grpc_example_service_proto_msgTypes[1]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -105,7 +104,7 @@ func (x *PingResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PingResponse.ProtoReflect.Descriptor instead.
 func (*PingResponse) Descriptor() ([]byte, []int) {
-	return file_tracer_grpc_example_service_proto_rawDescGZIP(), []int{1}
+	return file_web_grpc_example_service_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *PingResponse) GetMessage() string {
@@ -115,44 +114,44 @@ func (x *PingResponse) GetMessage() string {
 	return ""
 }
 
-var File_tracer_grpc_example_service_proto protoreflect.FileDescriptor
+var File_web_grpc_example_service_proto protoreflect.FileDescriptor
 
-var file_tracer_grpc_example_service_proto_rawDesc = []byte{
-	0x0a, 0x21, 0x74, 0x72, 0x61, 0x63, 0x65, 0x72, 0x2f, 0x67, 0x72, 0x70, 0x63, 0x5f, 0x65, 0x78,
-	0x61, 0x6d, 0x70, 0x6c, 0x65, 0x2f, 0x73, 0x65, 0x72, 0x76, 0x69, 0x63, 0x65, 0x2e, 0x70, 0x72,
-	0x6f, 0x74, 0x6f, 0x22, 0x21, 0x0a, 0x0b, 0x50, 0x69, 0x6e, 0x67, 0x52, 0x65, 0x71, 0x75, 0x65,
-	0x73, 0x74, 0x12, 0x12, 0x0a, 0x04, 0x6e, 0x61, 0x6d, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09,
-	0x52, 0x04, 0x6e, 0x61, 0x6d, 0x65, 0x22, 0x28, 0x0a, 0x0c, 0x50, 0x69, 0x6e, 0x67, 0x52, 0x65,
-	0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x18, 0x0a, 0x07, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67,
-	0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x07, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65,
-	0x32, 0x3b, 0x0a, 0x12, 0x45, 0x78, 0x61, 0x6d, 0x70, 0x6c, 0x65, 0x47, 0x52, 0x50, 0x43, 0x53,
-	0x65, 0x72, 0x76, 0x69, 0x63, 0x65, 0x12, 0x25, 0x0a, 0x04, 0x50, 0x69, 0x6e, 0x67, 0x12, 0x0c,
-	0x2e, 0x50, 0x69, 0x6e, 0x67, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x0d, 0x2e, 0x50,
-	0x69, 0x6e, 0x67, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x42, 0x34, 0x5a,
-	0x32, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x69, 0x6d, 0x2d, 0x6b,
-	0x75, 0x6c, 0x69, 0x6b, 0x6f, 0x76, 0x2f, 0x67, 0x6f, 0x2d, 0x62, 0x6f, 0x6e, 0x65, 0x73, 0x2f,
-	0x74, 0x72, 0x61, 0x63, 0x65, 0x72, 0x2f, 0x67, 0x72, 0x70, 0x63, 0x5f, 0x65, 0x78, 0x61, 0x6d,
-	0x70, 0x6c, 0x65, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
+var file_web_grpc_example_service_proto_rawDesc = []byte{
+	0x0a, 0x1e, 0x77, 0x65, 0x62, 0x2f, 0x67, 0x72, 0x70, 0x63, 0x5f, 0x65, 0x78, 0x61, 0x6d, 0x70,
+	0x6c, 0x65, 0x2f, 0x73, 0x65, 0x72, 0x76, 0x69, 0x63, 0x65, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f,
+	0x22, 0x21, 0x0a, 0x0b, 0x50, 0x69, 0x6e, 0x67, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12,
+	0x12, 0x0a, 0x04, 0x6e, 0x61, 0x6d, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x04, 0x6e,
+	0x61, 0x6d, 0x65, 0x22, 0x28, 0x0a, 0x0c, 0x50, 0x69, 0x6e, 0x67, 0x52, 0x65, 0x73, 0x70, 0x6f,
+	0x6e, 0x73, 0x65, 0x12, 0x18, 0x0a, 0x07, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x18, 0x01,
+	0x20, 0x01, 0x28, 0x09, 0x52, 0x07, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x32, 0x3b, 0x0a,
+	0x12, 0x45, 0x78, 0x61, 0x6d, 0x70, 0x6c, 0x65, 0x47, 0x52, 0x50, 0x43, 0x53, 0x65, 0x72, 0x76,
+	0x69, 0x63, 0x65, 0x12, 0x25, 0x0a, 0x04, 0x50, 0x69, 0x6e, 0x67, 0x12, 0x0c, 0x2e, 0x50, 0x69,
+	0x6e, 0x67, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x0d, 0x2e, 0x50, 0x69, 0x6e, 0x67,
+	0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x42, 0x39, 0x5a, 0x37, 0x67, 0x69,
+	0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x69, 0x6d, 0x2d, 0x6b, 0x75, 0x6c, 0x69,
+	0x6b, 0x6f, 0x76, 0x2f, 0x67, 0x6f, 0x2d, 0x62, 0x6f, 0x6e, 0x65, 0x73, 0x2f, 0x77, 0x65, 0x62,
+	0x2f, 0x67, 0x72, 0x70, 0x63, 0x5f, 0x65, 0x78, 0x61, 0x6d, 0x70, 0x6c, 0x65, 0x3b, 0x65, 0x78,
+	0x61, 0x6d, 0x70, 0x6c, 0x65, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
 }
 
 var (
-	file_tracer_grpc_example_service_proto_rawDescOnce sync.Once
-	file_tracer_grpc_example_service_proto_rawDescData = file_tracer_grpc_example_service_proto_rawDesc
+	file_web_grpc_example_service_proto_rawDescOnce sync.Once
+	file_web_grpc_example_service_proto_rawDescData = file_web_grpc_example_service_proto_rawDesc
 )
 
-func file_tracer_grpc_example_service_proto_rawDescGZIP() []byte {
-	file_tracer_grpc_example_service_proto_rawDescOnce.Do(func() {
-		file_tracer_grpc_example_service_proto_rawDescData = protoimpl.X.CompressGZIP(file_tracer_grpc_example_service_proto_rawDescData)
+func file_web_grpc_example_service_proto_rawDescGZIP() []byte {
+	file_web_grpc_example_service_proto_rawDescOnce.Do(func() {
+		file_web_grpc_example_service_proto_rawDescData = protoimpl.X.CompressGZIP(file_web_grpc_example_service_proto_rawDescData)
 	})
-	return file_tracer_grpc_example_service_proto_rawDescData
+	return file_web_grpc_example_service_proto_rawDescData
 }
 
-var file_tracer_grpc_example_service_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
-var file_tracer_grpc_example_service_proto_goTypes = []interface{}{
+var file_web_grpc_example_service_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_web_grpc_example_service_proto_goTypes = []interface{}{
 	(*PingRequest)(nil),  // 0: PingRequest
 	(*PingResponse)(nil), // 1: PingResponse
 }
-var file_tracer_grpc_example_service_proto_depIdxs = []int32{
+var file_web_grpc_example_service_proto_depIdxs = []int32{
 	0, // 0: ExampleGRPCService.Ping:input_type -> PingRequest
 	1, // 1: ExampleGRPCService.Ping:output_type -> PingResponse
 	1, // [1:2] is the sub-list for method output_type
@@ -162,13 +161,13 @@ var file_tracer_grpc_example_service_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for field type_name
 }
 
-func init() { file_tracer_grpc_example_service_proto_init() }
-func file_tracer_grpc_example_service_proto_init() {
-	if File_tracer_grpc_example_service_proto != nil {
+func init() { file_web_grpc_example_service_proto_init() }
+func file_web_grpc_example_service_proto_init() {
+	if File_web_grpc_example_service_proto != nil {
 		return
 	}
 	if !protoimpl.UnsafeEnabled {
-		file_tracer_grpc_example_service_proto_msgTypes[0].Exporter = func(v interface{}, i int) interface{} {
+		file_web_grpc_example_service_proto_msgTypes[0].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*PingRequest); i {
 			case 0:
 				return &v.state
@@ -180,7 +179,7 @@ func file_tracer_grpc_example_service_proto_init() {
 				return nil
 			}
 		}
-		file_tracer_grpc_example_service_proto_msgTypes[1].Exporter = func(v interface{}, i int) interface{} {
+		file_web_grpc_example_service_proto_msgTypes[1].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*PingResponse); i {
 			case 0:
 				return &v.state
@@ -197,18 +196,18 @@ func file_tracer_grpc_example_service_proto_init() {
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: file_tracer_grpc_example_service_proto_rawDesc,
+			RawDescriptor: file_web_grpc_example_service_proto_rawDesc,
 			NumEnums:      0,
 			NumMessages:   2,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_tracer_grpc_example_service_proto_goTypes,
-		DependencyIndexes: file_tracer_grpc_example_service_proto_depIdxs,
-		MessageInfos:      file_tracer_grpc_example_service_proto_msgTypes,
+		GoTypes:           file_web_grpc_example_service_proto_goTypes,
+		DependencyIndexes: file_web_grpc_example_service_proto_depIdxs,
+		MessageInfos:      file_web_grpc_example_service_proto_msgTypes,
 	}.Build()
-	File_tracer_grpc_example_service_proto = out.File
-	file_tracer_grpc_example_service_proto_rawDesc = nil
-	file_tracer_grpc_example_service_proto_goTypes = nil
-	file_tracer_grpc_example_service_proto_depIdxs = nil
+	File_web_grpc_example_service_proto = out.File
+	file_web_grpc_example_service_proto_rawDesc = nil
+	file_web_grpc_example_service_proto_goTypes = nil
+	file_web_grpc_example_service_proto_depIdxs = nil
 }

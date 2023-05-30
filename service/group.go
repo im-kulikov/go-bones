@@ -2,7 +2,7 @@ package service
 
 import "context"
 
-// Group allows to provide runner of services
+// Group allows to provide runner of services.
 type Group struct {
 	name string
 	opts []Service

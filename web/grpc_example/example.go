@@ -1,4 +1,4 @@
-package grpc_example
+package example
 
 import (
 	"context"
@@ -34,6 +34,8 @@ func (t *testGRPCService) Register(srv *grpc.Server) {
 }
 
 // NewTestService it's example package, so we should not care about exports
+//
+// nolint:revive
 //
 //goland:noinspection GoExportedFuncWithUnexportedType
 func NewTestService(name ...string) *testGRPCService {

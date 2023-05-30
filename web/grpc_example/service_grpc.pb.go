@@ -2,13 +2,12 @@
 // versions:
 // - protoc-gen-go-grpc v1.3.0
 // - protoc             v3.21.12
-// source: tracer/grpc_example/service.proto
+// source: web/grpc_example/service.proto
 
-package grpc_example
+package example
 
 import (
 	context "context"
-
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
@@ -106,5 +105,5 @@ var ExampleGRPCService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "tracer/grpc_example/service.proto",
+	Metadata: "web/grpc_example/service.proto",
 }
