@@ -12,7 +12,7 @@ import (
 
 // HTTPConfig provides configuration for http server.
 type HTTPConfig struct {
-	Disable bool   `env:"DISABLE" default:"false" usage:"allows to disable http server"`
+	Enabled bool   `env:"ENABLED" default:"false" usage:"allows to enable http server"`
 	Address string `env:"ADDRESS" default:":8080" usage:"HTTP server listen address"`
 	Network string `env:"NETWORK" default:"tcp" usage:"HTTP server listen network: tpc/udp"`
 	NoTrace bool   `env:"NO_TRACE" default:"false" usage:"allows to disable tracing for HTTP server"`
@@ -34,6 +34,8 @@ func NewHTTPServer(opts ...HTTPOption) service.Service {
 	serve := &httpServer{
 		name:   defaultHTTPName,
 		logger: logger.Default(),
+
+		HTTPConfig: HTTPConfig{Enabled: true},
 	}
 
 	for _, o := range opts {
@@ -47,7 +49,7 @@ func NewHTTPServer(opts ...HTTPOption) service.Service {
 func (s *httpServer) Name() string { return s.name }
 
 // Enabled returns is service enabled.
-func (s *httpServer) Enabled() bool { return !s.HTTPConfig.Disable }
+func (s *httpServer) Enabled() bool { return s.HTTPConfig.Enabled }
 
 // Start allows starting http server.
 func (s *httpServer) Start(ctx context.Context) error {

@@ -25,37 +25,20 @@ type Jaeger struct {
 }
 
 type jaegerExporterService struct {
-	cfg Jaeger
-	opt []Option
-	log logger.Logger
-
+	service.Service
 	*trace.TracerProvider
 }
 
-// Name of the service.
-func (j *jaegerExporterService) Name() string { return "jaeger-trace-exporter" }
-
-// Start does nothing.
-func (j *jaegerExporterService) Start(ctx context.Context) error {
-	<-ctx.Done()
-
-	return nil
-}
+const (
+	name                   = "jaeger-trace-exporter"
+	errCantUploadTraceSpan = "could not upload spans to Jaeger"
+)
 
 // Flush immediately exports all spans that have not yet been exported for
 // all the registered span processors.
 func (j *jaegerExporterService) Flush(ctx context.Context) error {
 	return j.TracerProvider.ForceFlush(ctx)
 }
-
-// Stop should gracefully teardown jaeger tracer2.TracerProvider.
-func (j *jaegerExporterService) Stop(ctx context.Context) {
-	if err := j.TracerProvider.Shutdown(ctx); err != nil {
-		j.log.Errorw("could not shutdown export provider", "error", err)
-	}
-}
-
-const errCantUploadTraceSpan = "could not upload spans to Jaeger"
 
 // prepareJaeger prepares jaeger module.
 // nolint:funlen
@@ -90,7 +73,6 @@ func prepareJaeger(log logger.Logger, cfg Jaeger, opts ...Option) (service.Servi
 
 		opt = jaeger.WithAgentEndpoint(
 			agentReconnectOption,
-			jaeger.WithLogger(log.Std()),
 			jaeger.WithAgentHost(cfg.AgentHost),
 			jaeger.WithAgentPort(cfg.AgentPort))
 	default:
@@ -120,9 +102,23 @@ func prepareJaeger(log logger.Logger, cfg Jaeger, opts ...Option) (service.Servi
 		JaegerPropagator{}))        // propagator serializes SpanContext to/from Jaeger Header
 
 	return &jaegerExporterService{
-		cfg:            cfg,
-		log:            log,
-		opt:            opts,
 		TracerProvider: provider,
+
+		Service: service.NewWorker(name, func(top context.Context) error {
+			<-top.Done()
+
+			ctx, cancel := context.WithTimeout(context.Background(), cfg.RetryInterval)
+			defer cancel()
+
+			log.Info("try to shutdown jaeger provider")
+
+			if err = provider.Shutdown(ctx); err != nil {
+				log.Errorw("could not shutdown export provider", "error", err)
+
+				return err
+			}
+
+			return nil
+		}),
 	}, nil
 }

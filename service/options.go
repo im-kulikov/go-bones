@@ -5,11 +5,11 @@ import (
 )
 
 // Option allows customizing service module.
-type Option func(*group)
+type Option func(*runner)
 
 // WithShutdownTimeout allows set shutdown timeout.
 func WithShutdownTimeout(v time.Duration) Option {
-	return func(g *group) {
+	return func(g *runner) {
 		if v == 0 {
 			return
 		}
@@ -20,7 +20,7 @@ func WithShutdownTimeout(v time.Duration) Option {
 
 // WithLoggerPingPong allows to set ping-pong timer for logger.
 func WithLoggerPingPong(v time.Duration) Option {
-	return func(g *group) {
+	return func(g *runner) {
 		if v <= 0 {
 			return
 		}
@@ -32,7 +32,7 @@ func WithLoggerPingPong(v time.Duration) Option {
 
 // WithIgnoreError allows set ignored errors.
 func WithIgnoreError(v error) Option {
-	return func(g *group) {
+	return func(g *runner) {
 		if v == nil {
 			return
 		}
@@ -41,19 +41,33 @@ func WithIgnoreError(v error) Option {
 	}
 }
 
-// WithService allows set Service into Group.
+func (g *runner) append(v Service) {
+	if svc, ok := v.(Enabler); ok && !svc.Enabled() {
+		g.logger.Warnw("service disabled", "service", v.Name())
+
+		return
+	}
+
+	g.services = append(g.services, v)
+}
+
+// WithService allows set Service into Runner.
 func WithService(v Service) Option {
-	return func(g *group) {
+	return func(g *runner) {
 		if v == nil {
 			return
 		}
 
-		if svc, ok := v.(Enabler); ok && !svc.Enabled() {
-			g.logger.Warnw("service disabled", "service", v.Name())
+		if group, ok := v.(*Group); ok {
+			g.logger.Info("try to add group services")
+
+			for _, svc := range group.Services() {
+				g.append(svc)
+			}
 
 			return
 		}
 
-		g.services = append(g.services, v)
+		g.append(v)
 	}
 }

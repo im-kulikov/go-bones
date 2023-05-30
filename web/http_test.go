@@ -27,7 +27,7 @@ func TestHTTPServer(t *testing.T) {
 		defer func() { require.NoError(t, lis.Close()) }()
 
 		serve := NewHTTPServer(WithHTTPLogger(logger.ForTests(t)), WithHTTPConfig(HTTPConfig{
-			Disable: true,
+			Enabled: false,
 			Address: lis.Addr().String(),
 			Network: lis.Addr().Network(),
 		}))

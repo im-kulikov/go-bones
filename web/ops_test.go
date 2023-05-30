@@ -85,10 +85,11 @@ func TestEmptyHealthCheckers(t *testing.T) {
 
 	cfg := prepareConfig(t,
 		"NO_TRACE=true",
+		"ENABLED=true",
 		"ADDRESS="+lis.Addr().String(),
 		"NETWORK="+lis.Addr().Network())
 
-	wrk, ops := NewOpsServer(log, cfg)
+	ops := NewOpsServer(log, cfg)
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*100)
 	defer cancel()
@@ -116,7 +117,6 @@ func TestEmptyHealthCheckers(t *testing.T) {
 	}()
 
 	require.NoError(t, service.New(log,
-		service.WithService(wrk),
 		service.WithService(ops),
 		service.WithShutdownTimeout(time.Millisecond)).Run(ctx))
 
@@ -133,10 +133,11 @@ func TestNewOpsServer(t *testing.T) {
 
 	cfg := prepareConfig(t,
 		"NO_TRACE=false",
+		"ENABLED=true",
 		"ADDRESS="+lis.Addr().String(),
 		"NETWORK="+lis.Addr().Network())
 
-	wrk, ops := NewOpsServer(log, cfg,
+	ops := NewOpsServer(log, cfg,
 		nil, // should be ignored
 		fakeHealthChecker("test"),
 		fakeHealthChecker("test-with-error"))
@@ -147,9 +148,6 @@ func TestNewOpsServer(t *testing.T) {
 	done := make(chan struct{})
 
 	require.Equal(t, ops.Name(), opsServiceName)
-
-	require.Implements(t, (*service.Enabler)(nil), ops)
-	require.True(t, ops.(service.Enabler).Enabled())
 
 	go func() {
 		// wait until service will start
@@ -189,7 +187,6 @@ func TestNewOpsServer(t *testing.T) {
 	}()
 
 	assert.NoError(t, service.New(log,
-		service.WithService(wrk),
 		service.WithService(ops),
 		service.WithShutdownTimeout(time.Millisecond)).Run(ctx))
 

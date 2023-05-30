@@ -20,7 +20,7 @@ var renderedHelp = `Usage:
 Default envs:
 
 SHUTDOWN_TIMEOUT=5s                               # allows to set custom graceful shutdown timeout
-OPS_DISABLE=false                                 # allows to disable ops server
+OPS_ENABLED=false                                 # allows to enable ops server
 OPS_ADDRESS=:8081                                 # allows to set set ops address:port
 OPS_NETWORK=tcp                                   # allows to set ops listen network: tcp/udp
 OPS_NO_TRACE=true                                 # allows to disable tracing
@@ -32,7 +32,7 @@ LOGGER_LEVEL=info                                 # allows to set custom logger 
 LOGGER_TRACE=fatal                                # allows to set custom trace level
 LOGGER_SAMPLE_RATE=1000                           # allows to set sample rate
 TRACER_TYPE=jaeger                                # allows to set trace exporter type
-TRACER_DISABLE=false                              # allows to disable tracing
+TRACER_ENABLED=false                              # allows to enable tracing
 TRACER_SAMPLER=1                                  # allows to choose sampler
 TRACER_ENDPOINT=<empty>                           # allows to set jaeger endpoint (one of)
 TRACER_AGENT_HOST=<empty>                         # allows to set jaeger agent host (one of)

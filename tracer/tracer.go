@@ -9,7 +9,7 @@ import (
 // Config provides configuration for jaeger tracer.
 type Config struct {
 	Type    Type `env:"TYPE" default:"jaeger" usage:"allows to set trace exporter type"`
-	Disable bool `env:"DISABLE" default:"false" usage:"allows to disable tracing"`
+	Enabled bool `env:"ENABLED" default:"false" usage:"allows to enable tracing"`
 
 	Jaeger
 }
@@ -27,7 +27,7 @@ var errUnknownType = bones.Error{
 
 // Init configure tracer component and prepares it to work.
 func Init(log logger.Logger, cfg Config, opts ...Option) (service.Service, error) {
-	if cfg.Disable {
+	if !cfg.Enabled {
 		return nil, nil
 	}
 

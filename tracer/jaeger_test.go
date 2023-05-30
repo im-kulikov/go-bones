@@ -23,17 +23,12 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/examples/helloworld/helloworld"
 
 	"github.com/im-kulikov/go-bones/logger"
 	"github.com/im-kulikov/go-bones/service"
 	"github.com/im-kulikov/go-bones/web"
+	example "github.com/im-kulikov/go-bones/web/grpc_example"
 )
-
-type testGRPCService struct {
-	*testing.T
-	helloworld.GreeterServer
-}
 
 type catchBufferSync struct {
 	mock.Mock
@@ -43,18 +38,7 @@ type catchBufferSync struct {
 
 const testEndpoint = "http://jaeger:62254"
 
-var (
-	_ logger.WriteSyncer       = (*catchBufferSync)(nil)
-	_ helloworld.GreeterServer = (*testGRPCService)(nil)
-)
-
-func (t *testGRPCService) SayHello(ctx context.Context, req *helloworld.HelloRequest) (*helloworld.HelloReply, error) {
-	if tid := trace.SpanFromContext(ctx).SpanContext().TraceID().String(); tid != "" {
-		return &helloworld.HelloReply{Message: tid}, nil
-	}
-
-	return &helloworld.HelloReply{Message: req.Name}, nil
-}
+var _ logger.WriteSyncer = (*catchBufferSync)(nil)
 
 func (c *catchBufferSync) Write(data []byte) (int, error) {
 	args := c.Called(data)
@@ -99,13 +83,10 @@ func prepareTestAddress(t *testing.T) string {
 }
 
 func newTestGRPCService(t *testing.T, log logger.Logger) (service.Service, string) {
-	svc := new(testGRPCService)
-	svc.T = t
-
 	serve := grpc.NewServer(
 		grpc.UnaryInterceptor(otelgrpc.UnaryServerInterceptor()),
 		grpc.StreamInterceptor(otelgrpc.StreamServerInterceptor()))
-	helloworld.RegisterGreeterServer(serve, svc)
+	example.Register(serve)
 
 	address := prepareTestAddress(t)
 
@@ -113,7 +94,7 @@ func newTestGRPCService(t *testing.T, log logger.Logger) (service.Service, strin
 			web.WithGRPCLogger(log),
 			web.WithGRPCServer(serve),
 			web.WithGRPCName("test-grpc"),
-			web.WithGRPCConfig(web.GRPCConfig{Address: address, Network: testNetwork})),
+			web.WithGRPCConfig(web.GRPCConfig{Enabled: true, Address: address, Network: testNetwork})),
 		address
 }
 
@@ -124,7 +105,7 @@ func newTestHTTPService(t *testing.T, log logger.Logger) (service.Service, strin
 			web.WithHTTPLogger(log),
 			web.WithHTTPName("test-http"),
 			web.WithHTTPHandler(http.NotFoundHandler()),
-			web.WithHTTPConfig(web.HTTPConfig{Address: address, Network: testNetwork})),
+			web.WithHTTPConfig(web.HTTPConfig{Enabled: true, Address: address, Network: testNetwork})),
 		address
 }
 
@@ -151,7 +132,7 @@ func newHTTPCase(ctx context.Context, hAddress string) assertion {
 	}
 }
 
-type grpcAssertion func(ctx context.Context, t *testing.T, cli helloworld.GreeterClient)
+type grpcAssertion func(ctx context.Context, t *testing.T, cli example.ExampleGRPCServiceClient)
 
 func newGRPCCase(ctx context.Context, gAddress string, check grpcAssertion) assertion {
 	return func(t *testing.T) {
@@ -167,7 +148,7 @@ func newGRPCCase(ctx context.Context, gAddress string, check grpcAssertion) asse
 			return
 		}
 
-		check(ctx, t, helloworld.NewGreeterClient(con))
+		check(ctx, t, example.NewExampleGRPCServiceClient(con))
 	}
 }
 
@@ -184,13 +165,13 @@ func testCases(top context.Context, t *testing.T, hAddress, gAddress string) {
 		},
 		{
 			name: "gRPC client propagate from context",
-			call: newGRPCCase(top, gAddress, func(ctx context.Context, t *testing.T, cli helloworld.GreeterClient) {
+			call: newGRPCCase(top, gAddress, func(ctx context.Context, t *testing.T, cli example.ExampleGRPCServiceClient) {
 				t.Helper()
 
 				stx, span := otel.Tracer("from-test").Start(ctx, "span-name")
 				defer span.End()
 
-				res, errRes := cli.SayHello(stx, &helloworld.HelloRequest{Name: testEndpoint})
+				res, errRes := cli.Ping(stx, &example.PingRequest{Name: testEndpoint})
 				assert.NoError(t, errRes)
 				if assert.NotNil(t, res) {
 					assert.Equal(t, span.SpanContext().TraceID().String(), res.Message)
@@ -199,7 +180,7 @@ func testCases(top context.Context, t *testing.T, hAddress, gAddress string) {
 		},
 		{
 			name: "gRPC client propagate from request headers",
-			call: newGRPCCase(top, gAddress, func(ctx context.Context, t *testing.T, cli helloworld.GreeterClient) {
+			call: newGRPCCase(top, gAddress, func(ctx context.Context, t *testing.T, cli example.ExampleGRPCServiceClient) {
 				t.Helper()
 
 				var tid trace.TraceID
@@ -215,7 +196,7 @@ func testCases(top context.Context, t *testing.T, hAddress, gAddress string) {
 
 					assert.Equal(t, tid, spanHandler.SpanContext().TraceID(), "incoming from http request")
 
-					res, errRes := cli.SayHello(r.Context(), &helloworld.HelloRequest{Name: testEndpoint})
+					res, errRes := cli.Ping(r.Context(), &example.PingRequest{Name: testEndpoint})
 					assert.NoError(t, errRes)
 					if assert.NotNil(t, res) {
 						assert.Equal(t, tid.String(), res.Message, "incoming from grpc request")
@@ -241,7 +222,7 @@ func testCases(top context.Context, t *testing.T, hAddress, gAddress string) {
 
 		{
 			name: "gRPC client propagate from uber-trace-id headers",
-			call: newGRPCCase(top, gAddress, func(ctx context.Context, t *testing.T, cli helloworld.GreeterClient) {
+			call: newGRPCCase(top, gAddress, func(ctx context.Context, t *testing.T, cli example.ExampleGRPCServiceClient) {
 				t.Helper()
 
 				var tid trace.TraceID
@@ -259,7 +240,7 @@ func testCases(top context.Context, t *testing.T, hAddress, gAddress string) {
 
 					assert.Equal(t, tid, span.SpanContext().TraceID(), "incoming from http request")
 
-					res, errRes := cli.SayHello(r.Context(), &helloworld.HelloRequest{Name: testEndpoint})
+					res, errRes := cli.Ping(r.Context(), &example.PingRequest{Name: testEndpoint})
 					assert.NoError(t, errRes)
 					if assert.NotNil(t, res) {
 						assert.Equal(t, tid.String(), res.Message, "incoming from grpc request")
@@ -316,8 +297,10 @@ const errLookupHost = "UDP connection not yet initialized, an address has not be
 func TestNew_Jaeger(t *testing.T) {
 	t.Run("should be ok", func(t *testing.T) {
 		cfg := prepareConfig(t,
+			"ENABLED=true",
 			"AGENT_HOST=jaeger",
 			"AGENT_PORT=62254",
+			"ENABLED=true",
 		)
 
 		ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*100)
@@ -357,10 +340,10 @@ func TestNew_Jaeger(t *testing.T) {
 	})
 
 	t.Run("should fail on dial", func(t *testing.T) {
-		cfg := prepareConfig(t, "ENDPOINT=http://jaeger:64444")
+		cfg := prepareConfig(t, "ENABLED=true", "ENDPOINT=http://jaeger:64444")
 		buf := new(bytes.Buffer)
 
-		log, err := logger.New(logger.Config{}, logger.WithCustomOutput("test", fakeSink{Writer: buf}))
+		log, err := logger.New(logger.Config{Trace: "error"}, logger.WithCustomOutput("test", fakeSink{Writer: buf}))
 		require.NoError(t, err)
 
 		svc, err := Init(log, cfg)
@@ -374,21 +357,17 @@ func TestNew_Jaeger(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, res.Body.Close())
 
-		err = svc.(Flusher).Flush(context.Background())
-		require.Error(t, errors.Unwrap(err))
-		require.Contains(t, errors.Unwrap(err).Error(), "dial tcp: lookup jaeger")
+		flusher, ok := svc.(Flusher)
+		require.True(t, ok, "should implement Flusher interface")
 
-		time.Sleep(time.Millisecond * 100)
-
-		grace, done := context.WithCancel(context.Background())
-		done()
-
-		require.NotPanics(t, func() { svc.Stop(grace) })
-		require.Contains(t, buf.String(), "could not shutdown export provider")
+		err = flusher.Flush(context.Background())
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "dial tcp: lookup jaeger")
 	})
 
 	t.Run("should call default error handler", func(t *testing.T) {
 		cfg := prepareConfig(t,
+			"ENABLED=true",
 			"AGENT_HOST=jaeger",
 			"AGENT_PORT=5555")
 
@@ -410,6 +389,7 @@ func TestNew_Jaeger(t *testing.T) {
 
 	t.Run("should fail on invalid agent", func(t *testing.T) {
 		cfg := prepareConfig(t,
+			"ENABLED=true",
 			"AGENT_HOST=host",
 			"AGENT_PORT=",
 			"AGENT_RETRY_COUNT=0",
@@ -421,17 +401,17 @@ func TestNew_Jaeger(t *testing.T) {
 	})
 
 	t.Run("should fail on unknown export", func(t *testing.T) {
-		cfg := prepareConfig(t)
+		cfg := prepareConfig(t, "ENABLED=true")
 		err := testInit(logger.ForTests(t), cfg)
 		require.EqualError(t, err, errUnknownType.Error(), "%#+v", err)
 	})
 
 	t.Run("should do nothing when disabled", func(t *testing.T) {
-		require.NoError(t, testInit(logger.ForTests(t), Config{Disable: true}))
+		require.NoError(t, testInit(logger.ForTests(t), Config{Enabled: false}))
 	})
 
 	t.Run("should fail on unknown type", func(t *testing.T) {
-		require.EqualError(t, testInit(logger.ForTests(t), Config{Type: "unknown-type"}), errUnknownType.Error())
+		require.EqualError(t, testInit(logger.ForTests(t), Config{Enabled: true, Type: "unknown-type"}), errUnknownType.Error())
 	})
 }
 

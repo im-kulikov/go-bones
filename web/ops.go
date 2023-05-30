@@ -21,7 +21,7 @@ import (
 
 // OpsConfig provides configuration for http server.
 type OpsConfig struct {
-	Disable bool   `env:"DISABLE" default:"false" usage:"allows to disable ops server"`
+	Enabled bool   `env:"ENABLED" default:"false" usage:"allows to enable ops server"`
 	Address string `env:"ADDRESS" default:":8081" usage:"allows to set set ops address:port"`
 	Network string `env:"NETWORK" default:"tcp" usage:"allows to set ops listen network: tcp/udp"`
 	NoTrace bool   `env:"NO_TRACE" default:"true" usage:"allows to disable tracing"`
@@ -55,7 +55,7 @@ const (
 
 func (o *OpsConfig) httpOption() HTTPOption {
 	return WithHTTPConfig(HTTPConfig{
-		Disable: o.Disable,
+		Enabled: o.Enabled,
 		Address: o.Address,
 		Network: o.Network,
 		NoTrace: o.NoTrace,
@@ -63,7 +63,11 @@ func (o *OpsConfig) httpOption() HTTPOption {
 }
 
 // NewOpsServer creates new OPS server and OPS HealthChecker's worker.
-func NewOpsServer(log logger.Logger, cfg OpsConfig, list ...HealthChecker) (service.Service, service.Service) {
+func NewOpsServer(log logger.Logger, cfg OpsConfig, list ...HealthChecker) service.Service {
+	if !cfg.Enabled {
+		return nil
+	}
+
 	mux := http.NewServeMux()
 
 	// prepare HealthChecker's worker and handler
@@ -82,11 +86,12 @@ func NewOpsServer(log logger.Logger, cfg OpsConfig, list ...HealthChecker) (serv
 	// metrics
 	mux.Handle(cfg.MetricsPath, promhttp.Handler())
 
-	return wrk, NewHTTPServer(
-		cfg.httpOption(),
-		WithHTTPLogger(log),
-		WithHTTPHandler(mux),
-		WithHTTPName(opsServiceName))
+	return service.NewGroup(opsServiceName,
+		wrk, NewHTTPServer(
+			cfg.httpOption(),
+			WithHTTPLogger(log),
+			WithHTTPHandler(mux),
+			WithHTTPName(opsServiceName)))
 }
 
 func newHealthWorkers(log logger.Logger, list ...HealthChecker) (service.Service, http.Handler) {
