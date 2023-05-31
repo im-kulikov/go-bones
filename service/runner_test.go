@@ -69,9 +69,7 @@ func TestNew(t *testing.T) {
 	svc2 := newTestService("service-disable")
 
 	grp := New(logger.ForTests(t),
-		WithService(svc1),
-		WithService(svc2),
-		WithService(nil),
+		WithService(NewGroup("multiple", svc1, svc2, nil)),
 		WithShutdownTimeout(time.Millisecond))
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*10)
@@ -80,7 +78,7 @@ func TestNew(t *testing.T) {
 	require.NoError(t, grp.Run(ctx))
 }
 
-func TestGroup(t *testing.T) {
+func TestRunner(t *testing.T) {
 	t.Run("should do nothing on empty services", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*100)
 		defer cancel()
