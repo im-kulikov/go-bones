@@ -12,35 +12,13 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/examples/helloworld/helloworld"
 
 	"github.com/im-kulikov/go-bones/logger"
 	"github.com/im-kulikov/go-bones/service"
+	example "github.com/im-kulikov/go-bones/web/grpc_example"
 )
 
-type testGRPCService struct {
-	helloworld.GreeterServer
-}
-
 const testGRPCServiceName = "grpc-test"
-
-var _ helloworld.GreeterServer = (*testGRPCService)(nil)
-
-func (t *testGRPCService) SayHello(_ context.Context, req *helloworld.HelloRequest) (*helloworld.HelloReply, error) {
-	return &helloworld.HelloReply{Message: req.Name}, nil
-}
-
-func (t *testGRPCService) Name() string {
-	return helloworld.Greeter_ServiceDesc.ServiceName
-}
-
-func (t *testGRPCService) Register(server *grpc.Server) {
-	helloworld.RegisterGreeterServer(server, t)
-}
-
-func newTestService() GRPCService {
-	return new(testGRPCService)
-}
 
 func TestNewGRPCServer(t *testing.T) {
 	lis, errListen := net.Listen(defaultGRPCNetwork, "127.0.0.1:0")
@@ -48,8 +26,7 @@ func TestNewGRPCServer(t *testing.T) {
 	require.NoError(t, lis.Close())
 
 	log := logger.ForTests(t)
-
-	hello := newTestService()
+	svc := example.NewTestService(testGRPCServiceName)
 
 	server := grpc.NewServer()
 
@@ -62,12 +39,12 @@ func TestNewGRPCServer(t *testing.T) {
 		WithGRPCName(testGRPCServiceName),
 		// pass custom gRPC service
 		WithGRPCService(nil), // should be ignored
-		WithGRPCService(hello),
+		WithGRPCService(svc),
 		// pass custom gRPC config
 		WithGRPCConfig(GRPCConfig{
 			Address: lis.Addr().String(),
 			Network: lis.Addr().Network(),
-			Disable: false,
+			Enabled: true,
 		}))
 
 	require.Equal(t, testGRPCServiceName, serve.Name())
@@ -82,8 +59,8 @@ func TestNewGRPCServer(t *testing.T) {
 			grpc.WithTransportCredentials(insecure.NewCredentials()))
 		assert.NoError(t, err)
 
-		res, err := helloworld.NewGreeterClient(conn).SayHello(context.Background(),
-			&helloworld.HelloRequest{Name: testGRPCServiceName})
+		res, err := example.NewExampleGRPCServiceClient(conn).Ping(context.Background(),
+			&example.PingRequest{Name: testGRPCServiceName})
 		assert.NoError(t, err)
 
 		assert.Equal(t, testGRPCServiceName, res.Message)
@@ -100,7 +77,7 @@ func TestGRPCServer(t *testing.T) {
 		defer func() { require.NoError(t, lis.Close()) }()
 
 		serve := NewGRPCServer(WithGRPCLogger(logger.ForTests(t)), WithGRPCConfig(GRPCConfig{
-			Disable: true,
+			Enabled: false,
 			Address: lis.Addr().String(),
 			Network: lis.Addr().Network(),
 		}))

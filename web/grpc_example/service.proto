@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+option go_package="github.com/im-kulikov/go-bones/web/grpc_example;example";
+
+service ExampleGRPCService {
+  rpc Ping(PingRequest) returns (PingResponse) {}
+}
+
+message PingRequest {
+  string name = 1;
+}
+
+message PingResponse {
+  string message = 1;
+}

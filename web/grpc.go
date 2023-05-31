@@ -14,7 +14,7 @@ import (
 
 // GRPCConfig provides configuration for http server.
 type GRPCConfig struct {
-	Disable bool   `env:"DISABLE" default:"false" usage:"allows to disable grpc server"`
+	Enabled bool   `env:"ENABLED" default:"false" usage:"allows to enable grpc server"`
 	Address string `env:"ADDRESS" default:":9080" usage:"gRPC server listen address"`
 	Network string `env:"NETWORK" default:"tcp" usage:"gRPC server listen network: tpc/udp"`
 }
@@ -49,6 +49,7 @@ func NewGRPCServer(opts ...GRPCOption) service.Service {
 		server: defaultGRPCServer(),
 
 		GRPCConfig: GRPCConfig{
+			Enabled: true,
 			Address: defaultGRPCAddress,
 			Network: defaultGRPCNetwork,
 		},
@@ -77,7 +78,7 @@ func NewGRPCServer(opts ...GRPCOption) service.Service {
 func (s *gRPCServer) Name() string { return s.name }
 
 // Enabled returns is service enabled.
-func (s *gRPCServer) Enabled() bool { return !s.GRPCConfig.Disable }
+func (s *gRPCServer) Enabled() bool { return s.GRPCConfig.Enabled }
 
 // Start allows starting gRPC server.
 func (s *gRPCServer) Start(ctx context.Context) error {

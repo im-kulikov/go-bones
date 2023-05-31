@@ -1,14 +1,13 @@
 -include .env
 
-SHELL            := /bin/sh
-GOBIN            ?= $(GOPATH)/bin
-PATH             := $(GOBIN):$(PATH)
-GO               = go
+SHELL       := /bin/sh
+GOBIN       ?= $(GOPATH)/bin
+PATH        := $(GOBIN):$(PATH)
+GO          = go
 
-M                = $(shell printf "\033[34;1m>>\033[0m")
-TARGET_DIR       ?= $(PWD)/.build
-MIGRATIONS_DIR   = ./sql/migrations/
-CRUD_FILE        = ./sql/queries/crud_queries.sql
+M           = $(shell printf "\033[34;1m>>\033[0m")
+MODULE      = $(shell go list -m)
+PROTO_FILES = $(wildcard ./**/**/*.proto)
 
 ifeq ($(DELVE_ENABLED),true)
 GCFLAGS	= -gcflags 'all=-N -l'
@@ -17,6 +16,11 @@ endif
 .PHONY: help
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
+
+.PHONY: generate-proto
+generate-proto: ## Generate gRPC protobuf
+	$(info $(M) generate golang code from gRPC proto...)
+	@protoc --go_opt=module=$(MODULE) --go-grpc_opt=module=$(MODULE) --go_out=. --go-grpc_out=. $(PROTO_FILES)
 
 .PHONY: deps
 deps: ## Ensure dependencies
