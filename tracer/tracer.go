@@ -1,6 +1,8 @@
 package tracer
 
 import (
+	"go.opentelemetry.io/otel/sdk/trace"
+
 	"github.com/im-kulikov/go-bones"
 	"github.com/im-kulikov/go-bones/logger"
 	"github.com/im-kulikov/go-bones/service"
@@ -16,6 +18,9 @@ type Config struct {
 
 // Type of tracer component.
 type Type string
+
+// SpanProcessor type alias.
+type SpanProcessor = trace.SpanProcessor
 
 // JaegerType allows use jaeger as tracer.
 const JaegerType = Type("jaeger")

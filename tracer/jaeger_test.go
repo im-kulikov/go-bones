@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -20,7 +21,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel"
+	tracer "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/zap/zaptest"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
@@ -30,29 +33,43 @@ import (
 	example "github.com/im-kulikov/go-bones/web/grpc_example"
 )
 
-type catchBufferSync struct {
-	mock.Mock
+type TestingT interface {
+	zaptest.TestingT
+	Helper()
+}
 
-	callback func(data []byte)
+type testingT struct {
+	*mock.Mock
+	*bytes.Buffer
+
+	TestingT
 }
 
 const testEndpoint = "http://jaeger:62254"
 
-var _ logger.WriteSyncer = (*catchBufferSync)(nil)
+var (
+	errTest = errors.New("test-error")
 
-func (c *catchBufferSync) Write(data []byte) (int, error) {
-	args := c.Called(data)
+	_ TestingT      = (*testingT)(nil)
+	_ SpanProcessor = (*testSpanProcessor)(nil)
+)
 
-	if c.callback != nil {
-		c.callback(data)
-	}
+type testSpanProcessor struct{}
 
-	return len(data), args.Error(0)
+func (*testSpanProcessor) OnStart(context.Context, tracer.ReadWriteSpan) {}
+
+func (*testSpanProcessor) OnEnd(tracer.ReadOnlySpan) {}
+
+func (*testSpanProcessor) Shutdown(context.Context) error { return errTest }
+
+func (*testSpanProcessor) ForceFlush(context.Context) error { return errTest }
+
+func (c *testingT) Logf(format string, args ...any) {
+	c.Called(format, args)
+
+	_, _ = fmt.Fprintf(c.Buffer, format, args...)
+	c.TestingT.Logf(format, args...)
 }
-
-func (c *catchBufferSync) Sync() error { return nil }
-
-func (c *catchBufferSync) Close() error { return nil }
 
 func prepareConfig(t *testing.T, envs ...string) Config {
 	var cfg Config
@@ -306,7 +323,7 @@ func TestNew_Jaeger(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*100)
 		defer cancel()
 
-		tracer, err := Init(logger.ForTests(t), cfg,
+		svc, err := Init(logger.ForTests(t), cfg,
 			WithJaegerServiceName("test-service"),
 			WithJaegerServiceVersion("test-version"),
 			WithJaegerServiceEnv("test"),
@@ -329,22 +346,25 @@ func TestNew_Jaeger(t *testing.T) {
 		}()
 
 		require.NoError(t, service.New(logger.ForTests(t),
-			service.WithService(tracer),
+			service.WithService(svc),
 			service.WithService(gServe),
 			service.WithService(hServe),
 			service.WithShutdownTimeout(time.Millisecond)).Run(ctx))
 
-		if tmp, ok := tracer.(Flusher); ok {
+		if tmp, ok := svc.(Flusher); ok {
 			require.NoError(t, tmp.Flush(context.Background()))
 		}
 	})
 
 	t.Run("should fail on dial", func(t *testing.T) {
-		cfg := prepareConfig(t, "ENABLED=true", "ENDPOINT=http://jaeger:64444")
-		buf := new(bytes.Buffer)
+		mck := new(mock.Mock)
+		mck.Test(t)
 
-		log, err := logger.New(logger.Config{Trace: "error"}, logger.WithCustomOutput("test", fakeSink{Writer: buf}))
-		require.NoError(t, err)
+		mck.On("Logf", "%s", mock.Anything).Maybe()
+
+		buf := new(bytes.Buffer)
+		log := logger.ForTests(&testingT{Buffer: buf, Mock: mck, TestingT: t})
+		cfg := prepareConfig(t, "ENABLED=true", "ENDPOINT=http://jaeger:64444")
 
 		svc, err := Init(log, cfg)
 		require.NoError(t, err)
@@ -363,6 +383,21 @@ func TestNew_Jaeger(t *testing.T) {
 		err = flusher.Flush(context.Background())
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "dial tcp: lookup jaeger")
+
+		ctx, cancel := context.WithCancel(context.TODO())
+		cancel()
+
+		je, ok := svc.(*jaegerExporterService)
+		require.True(t, ok)
+
+		// used to return error when service would be stopped
+		je.TracerProvider.RegisterSpanProcessor(new(testSpanProcessor))
+
+		require.EqualError(t, svc.Start(ctx), errTest.Error())
+		require.NotPanics(t, func() { svc.Stop(context.TODO()) })
+
+		require.Contains(t, buf.String(), "try to shutdown jaeger provider")
+		require.Contains(t, buf.String(), "could not shutdown export provider")
 	})
 
 	t.Run("should call default error handler", func(t *testing.T) {

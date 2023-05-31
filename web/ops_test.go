@@ -76,6 +76,22 @@ func containsComparer(expect string) assertion {
 	}
 }
 
+func TestDisabledOpsServer(t *testing.T) {
+	log := logger.ForTests(t)
+
+	lis, err := net.Listen(defaultOPSNetwork, "127.0.0.1:0")
+	require.NoError(t, err)
+	require.NoError(t, lis.Close())
+
+	cfg := prepareConfig(t,
+		"NO_TRACE=true",
+		"ADDRESS="+lis.Addr().String(),
+		"NETWORK="+lis.Addr().Network())
+
+	ops := NewOpsServer(log, cfg)
+	require.Empty(t, ops)
+}
+
 func TestEmptyHealthCheckers(t *testing.T) {
 	log := logger.ForTests(t)
 
