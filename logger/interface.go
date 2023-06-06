@@ -50,6 +50,8 @@ type Logger interface {
 
 	With(...interface{}) Logger
 
+	Named(string) Logger
+
 	Sugar() *SugaredLogger
 
 	Std() *log.Logger

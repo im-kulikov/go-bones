@@ -201,12 +201,16 @@ func (g *runner) stopServices(ctx context.Context, cause error, output <-chan st
 	for {
 		select {
 		case <-grace.Done():
+			g.logger.Info("gracefully shutdown")
+
 			return
 		case <-output:
 			stopped++
 
 			if stopped == length {
-				return
+				stop()
+
+				continue
 			}
 		}
 	}
