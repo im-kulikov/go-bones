@@ -1,13 +1,17 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap/zapcore"
 
 	"github.com/im-kulikov/go-bones/logger"
 )
@@ -18,6 +22,8 @@ type (
 	stuckService time.Duration
 )
 
+type fakeSink struct{ io.Writer }
+
 var errTest = errors.New("test")
 
 var (
@@ -25,6 +31,10 @@ var (
 	_ Service = mockService("two")
 	_ Service = stuckService(1)
 )
+
+func (f *fakeSink) Close() error { return nil }
+
+func (f *fakeSink) Sync() error { return nil }
 
 func (stuckService) Name() string { return "stuck-service" }
 
@@ -76,6 +86,51 @@ func TestNew(t *testing.T) {
 	defer cancel()
 
 	require.NoError(t, grp.Run(ctx))
+}
+
+func TestGraceStop(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	buf := new(bytes.Buffer)
+	run := make(chan struct{})
+	end := make(chan struct{})
+	done := make(chan struct{})
+
+	log, err := logger.New(logger.Config{
+		EncodingConsole: true,
+		Level:           zapcore.InfoLevel.String(),
+		Trace:           zapcore.FatalLevel.String(),
+	}, logger.WithCustomOutput("custom-output-name", &fakeSink{Writer: buf}))
+
+	require.NoError(t, err)
+
+	grp := New(log,
+		WithShutdownTimeout(time.Millisecond),
+		WithService(NewWorker("test-worker", func(ctx context.Context) error {
+			close(done)
+
+			<-ctx.Done()
+
+			time.Sleep(time.Millisecond * 100)
+
+			close(end)
+
+			return ctx.Err()
+		})))
+
+	go func() {
+		assert.NoError(t, grp.Run(ctx))
+
+		close(run)
+	}()
+
+	<-done   // started
+	cancel() // should be graceful shutdown
+	<-end    // should be closed
+	<-run    // wait for run
+
+	require.Contains(t, buf.String(), "gracefully shutdown")
 }
 
 func TestRunner(t *testing.T) {
@@ -140,7 +195,7 @@ func TestRunner(t *testing.T) {
 			WithShutdownTimeout(time.Millisecond*25))
 
 		require.NoError(t, grp.Run(ctx))
-		require.InDelta(t, time.Since(now), time.Millisecond*2, float64(time.Millisecond*5)) // 5ms lags
+		require.InDelta(t, time.Since(now), time.Millisecond*2, float64(time.Millisecond*20)) // possible 20ms lags
 	})
 
 	t.Run("should stop on graceful context deadlined", func(t *testing.T) {

@@ -64,6 +64,16 @@ func (l *logger) With(args ...interface{}) Logger {
 	}
 }
 
+// Named allows to set name for zap.SugaredLogger.
+func (l *logger) Named(name string) Logger {
+	return &logger{
+		config:        l.config,
+		appName:       l.appName,
+		appVersion:    l.appVersion,
+		SugaredLogger: l.SugaredLogger.Named(name),
+	}
+}
+
 // Sugar returns zap.SugaredLogger.
 func (l *logger) Sugar() *SugaredLogger { return l.SugaredLogger }
 

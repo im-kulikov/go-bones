@@ -14,6 +14,8 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
+const another = `another-error`
+
 func TestSafeLevel(t *testing.T) {
 	cases := []struct {
 		name string
@@ -156,7 +158,7 @@ func TestNew(t *testing.T) {
 	cases := []struct {
 		name   string
 		config Config
-		output string
+		output []string
 		option []Option
 		error  error
 	}{
@@ -167,7 +169,21 @@ func TestNew(t *testing.T) {
 				Trace: zapcore.FatalLevel.String(),
 			},
 
-			output: `timestamp`,
+			output: []string{
+				`timestamp`,
+				// default logger
+				`"level":"error"`,
+				`"level":"info"`,
+				`hello world`,
+				`"app":"app-name"`,
+				`"version":"app-version"`,
+				`"key":"val"`,
+				// errors
+				`"error":"test-error"`,
+				// custom logger:
+				`"logger":"custom-name"`,
+				`"msg":"custom logger info message"`,
+			},
 
 			option: []Option{
 				WithAppName("app-name"),
@@ -215,11 +231,28 @@ func TestNew(t *testing.T) {
 			require.Equal(t, tt.error, err)
 
 			if tt.error == nil {
-				log.With("key", "val").Error("hello world")
+				log.With(zap.Error(errors.New("test-error"))).
+					With(zap.String("key", "val")).
+					Error("hello world")
+
+				log.Named("custom-name").
+					With(zap.NamedError(another, nil)).
+					Info("custom logger info message")
 
 				log.Std().Println("hello world")
 
-				require.Contains(t, buf.String(), tt.output)
+				out := buf.String()
+
+				t.Logf("Output:\n%s", out)
+				require.NotContainsf(t, out, another, "should not contains %q", another)
+
+				for i := range tt.output {
+					msg := tt.output[i]
+
+					t.Run("should contains "+msg, func(t *testing.T) {
+						require.Containsf(t, out, msg, "should contains %q", msg)
+					})
+				}
 			}
 		})
 	}
