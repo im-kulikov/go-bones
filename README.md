@@ -156,11 +156,10 @@ func main() {
         log.Fatalf("could not initialize tracer: %s", err)
     }
 
-    wrk, ops := web.NewOpsServer(log, cfg.Base.Ops)
+    ops := web.NewOpsServer(log, cfg.Base.Ops)
 
     group := service.New(log,
         service.WithService(ops),
-        service.WithService(wrk),
         service.WithService(trace),
         service.WithShutdownTimeout(cfg.Base.Shutdown))
 
@@ -323,8 +322,8 @@ import (
 
 func main() {
     log := logger.Default()
-    wrk, ops := web.NewOpsServer(log, web.OpsConfig{
-        Disable: false,
+    ops := web.NewOpsServer(log, web.OpsConfig{
+        Enabled: true,
         Address: ":8081",
         Network: "tcp",
         NoTrace: false,
@@ -334,8 +333,9 @@ func main() {
         ProfilePath: "/custom-profile-path",
     }, ...web.HealthChecker)
 
-    _ = ops // http.Server with healthy, metrics and profiler
-    _ = wrk // HealthChecker's worker that run health check for each passed component
+	// http.Server with healthy, metrics and profiler and
+	// HealthChecker's worker that run health check for each passed component
+    _ = ops
 
     // ...
 }
@@ -361,7 +361,7 @@ func main() {
         web.WithHTTPName("custom"),
         web.WithHTTPHandler(handler),
         web.WithHTTPConfig(web.HTTPConfig{
-            Disable: false,
+            Enabled: true,
             Address: ":8080",
             Network: "tcp",
         }))
@@ -403,7 +403,8 @@ func main() {
         web.WithGRPCService(service2),
         web.WithGRPCService(service3),
         web.WithGRPCConfig(web.GRPCConfig{
-            Disable: false,
+            Enabled: true,
+			Reflect: true, // enables reflection service
             Address: ":9090",
             Network: "tcp",
         }))
@@ -437,7 +438,7 @@ func main() {
 
     cfg := tracer.Config{
         Type:    tracer.JaegerType,
-        Disable: false,
+        Enabled: true,
 
         Jaeger: tracer.Jaeger{
             Sampler:       1,

@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	reflection "google.golang.org/grpc/reflection/grpc_reflection_v1alpha"
 
 	"github.com/im-kulikov/go-bones/logger"
 	"github.com/im-kulikov/go-bones/service"
@@ -45,6 +46,7 @@ func TestNewGRPCServer(t *testing.T) {
 			Address: lis.Addr().String(),
 			Network: lis.Addr().Network(),
 			Enabled: true,
+			Reflect: true,
 		}))
 
 	require.Equal(t, testGRPCServiceName, serve.Name())
@@ -59,11 +61,44 @@ func TestNewGRPCServer(t *testing.T) {
 			grpc.WithTransportCredentials(insecure.NewCredentials()))
 		assert.NoError(t, err)
 
-		res, err := example.NewExampleGRPCServiceClient(conn).Ping(context.Background(),
-			&example.PingRequest{Name: testGRPCServiceName})
-		assert.NoError(t, err)
+		{ // example ping
+			var res *example.PingResponse
+			res, err = example.NewExampleGRPCServiceClient(conn).Ping(context.Background(),
+				&example.PingRequest{Name: testGRPCServiceName})
+			assert.NoError(t, err)
 
-		assert.Equal(t, testGRPCServiceName, res.Message)
+			assert.Equal(t, testGRPCServiceName, res.Message)
+		}
+
+		{ // call reflection service
+			var cli reflection.ServerReflection_ServerReflectionInfoClient
+			cli, err = reflection.NewServerReflectionClient(conn).ServerReflectionInfo(context.TODO())
+			assert.NoError(t, err)
+
+			// should be fixed when it would be changed in reflection service.
+			assert.NoError(t, cli.Send(&reflection.ServerReflectionRequest{ // nolint:staticcheck
+				Host:           "*",
+				MessageRequest: &reflection.ServerReflectionRequest_ListServices{},
+			}))
+
+			// should be fixed when it would be changed in reflection service.
+			assert.NoError(t, cli.CloseSend())
+
+			var res *reflection.ServerReflectionResponse // nolint:staticcheck
+			res, err = cli.Recv()
+			assert.NoError(t, err)
+
+			list, ok := res.MessageResponse.(*reflection.ServerReflectionResponse_ListServicesResponse)
+			assert.True(t, ok)
+
+			expect := []string{"ExampleGRPCService", "grpc.reflection.v1alpha.ServerReflection"}
+			actual := make([]string, 0, len(list.ListServicesResponse.Service)) // nolint:staticcheck
+			for _, item := range list.ListServicesResponse.Service {            // nolint:staticcheck
+				actual = append(actual, item.Name) // nolint:staticcheck
+			}
+
+			assert.Equal(t, expect, actual)
+		}
 	}()
 
 	require.NoError(t, serve.Start(context.Background()))

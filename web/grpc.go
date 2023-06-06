@@ -15,6 +15,7 @@ import (
 // GRPCConfig provides configuration for http server.
 type GRPCConfig struct {
 	Enabled bool   `env:"ENABLED" default:"false" usage:"allows to enable grpc server"`
+	Reflect bool   `env:"REFLECT" default:"false" usage:"allows to enable grpc reflection service"`
 	Address string `env:"ADDRESS" default:":9080" usage:"gRPC server listen address"`
 	Network string `env:"NETWORK" default:"tcp" usage:"gRPC server listen network: tpc/udp"`
 }
@@ -57,6 +58,10 @@ func NewGRPCServer(opts ...GRPCOption) service.Service {
 
 	for _, o := range opts {
 		o(serve)
+	}
+
+	if serve.Reflect {
+		serve.services = append(serve.services, new(reflectionService))
 	}
 
 	for i := range serve.services {
