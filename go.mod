@@ -3,7 +3,7 @@ module github.com/im-kulikov/go-bones
 go 1.20
 
 require (
-	github.com/cristalhq/aconfig v0.18.4
+	github.com/cristalhq/aconfig v0.18.5
 	github.com/cristalhq/aconfig/aconfigdotenv v0.17.1
 	github.com/go-ozzo/ozzo-validation/v4 v4.3.0
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
