@@ -1,38 +1,67 @@
 package config
 
 import (
-	"context"
+	"fmt"
 	"reflect"
-	"time"
 
-	"github.com/im-kulikov/go-bones/logger"
-	"github.com/im-kulikov/go-bones/tracer"
-	"github.com/im-kulikov/go-bones/web"
+	"github.com/im-kulikov/go-bones"
 )
 
-// Base contains base settings for go-bones modules.
-// You can include it to your config file and use.
 type Base struct {
-	Shutdown time.Duration `env:"SHUTDOWN_TIMEOUT" default:"5s" usage:"allows to set custom graceful shutdown timeout"`
-
-	Ops    web.OpsConfig `env:"OPS"`
-	Logger logger.Config `env:"LOGGER"`
-	Tracer tracer.Config `env:"TRACER"`
+	Logger    Logger `env:"LOGGER" yaml:"logger" json:"logger" toml:"logger"`
+	OpsServer Ops    `env:"OPS" yaml:"ops" json:"ops" toml:"ops"`
 }
 
-// Validate allows to validate base config and common libraries configs.
-func (b Base) Validate(ctx context.Context) error {
-	val := reflect.ValueOf(&b).Elem()
-	for i := 0; i < val.NumField(); i++ {
-		tmp, ok := val.Field(i).Addr().Interface().(Config)
-		if !ok {
-			continue
-		}
+type appSettings struct {
+	name    string
+	version string
+}
 
-		if err := tmp.Validate(ctx); err != nil {
-			return err
-		}
+type appSetter interface {
+	SetAppNameAndVersion(name, version string)
+}
+
+const ErrPointerExpected bones.Error = "expected a pointer to a struct"
+
+var baseType = reflect.TypeOf(Base{}) // nolint:gochecknoglobals
+
+func (s *appSettings) SetAppNameAndVersion(name, version string) {
+	s.name = name
+	s.version = version
+}
+
+// AppName of the application from settings.
+func (s *appSettings) AppName() string { return s.name }
+
+// AppVersion of the application from settings.
+func (s *appSettings) AppVersion() string { return s.version }
+
+func setAppSettings(v any, name, version string) error {
+	val := reflect.ValueOf(v)
+	if val.Kind() != reflect.Pointer || val.Elem().Kind() != reflect.Struct {
+		return fmt.Errorf("%w: %T", ErrPointerExpected, v)
+	}
+
+	base := val.Elem().FieldByName("Base")
+	if base.IsValid() && base.CanConvert(baseType) {
+		setAppSettingsRecursive(base, name, version)
 	}
 
 	return nil
+}
+
+func setAppSettingsRecursive(val reflect.Value, name, version string) {
+	for i := 0; i < val.NumField(); i++ {
+		field := val.Field(i)
+		if field.Kind() != reflect.Struct || !field.IsValid() || !field.CanInterface() || !field.CanAddr() {
+			continue
+		}
+
+		setter, ok := field.Addr().Interface().(appSetter)
+		if ok {
+			setter.SetAppNameAndVersion(name, version)
+		}
+
+		setAppSettingsRecursive(field, name, version)
+	}
 }

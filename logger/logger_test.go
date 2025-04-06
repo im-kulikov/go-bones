@@ -3,257 +3,197 @@ package logger
 import (
 	"bytes"
 	"context"
-	"errors"
+	"fmt"
 	"io"
-	"regexp"
+	"log/slog"
+	"math"
+	"os"
+	"strings"
 	"testing"
+	"time"
 
-	validation "github.com/go-ozzo/ozzo-validation/v4"
+	"github.com/davecgh/go-spew/spew"
+	"github.com/im-kulikov/gonfig"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
+	"go.opentelemetry.io/otel/attribute"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/im-kulikov/go-bones/config"
 )
 
-const another = `another-error`
+func TestTest(t *testing.T) {
+	//
+}
 
-func TestSafeLevel(t *testing.T) {
-	cases := []struct {
-		name string
+type stubIDGenerator int
 
-		level  string
-		expect zapcore.Level
-	}{
-		{name: "expect InfoLevel", level: "info", expect: zapcore.InfoLevel},
-		{name: "expect InfoLevel for unknown", level: "unknown", expect: zapcore.InfoLevel},
-		{name: "expect DebugLevel", level: "debug", expect: zapcore.DebugLevel},
-		{name: "expect WarnLevel", level: "warn", expect: zapcore.WarnLevel},
-		{name: "expect ErrorLevel", level: "error", expect: zapcore.ErrorLevel},
-		{name: "expect DPanicLevel", level: "dpanic", expect: zapcore.DPanicLevel},
-		{name: "expect PanicLevel", level: "panic", expect: zapcore.PanicLevel},
-		{name: "expect FatalLevel", level: "fatal", expect: zapcore.FatalLevel},
+func (s stubIDGenerator) NewIDs(context.Context) (trace.TraceID, trace.SpanID) {
+	return trace.TraceID{0x01}, trace.SpanID{0x02}
+}
+
+func (s stubIDGenerator) NewSpanID(context.Context, trace.TraceID) trace.SpanID {
+	return trace.SpanID{0x02}
+}
+
+// nolint:lll
+const attributesLogExpected = `
+level=INFO msg="group test" app.name=test-app-name app.version=test-app-version group.key=value
+level=INFO msg=test1 app.name=test-app-name app.version=test-app-version
+level=INFO msg=test2 app.name=test-app-name app.version=test-app-version
+level=INFO msg=test3 app.name=test-app-name app.version=test-app-version error="test error"
+level=INFO msg=test3 app.name=test-app-name app.version=test-app-version err="test error"
+level=INFO msg="[service] message from some service" app.name=test-app-name app.version=test-app-version key=value
+level=ERROR msg="tracing message" app.name=test-app-name app.version=test-app-version error="context canceled" ctxKey=ctxVal trace.span_id=0200000000000000 trace.trace_id=01000000000000000000000000000000
+level=INFO msg="message with multi attributes" app.name=test-app-name app.version=test-app-version String=string-value Int64=9223372036854775807 Int=9223372036854775807 Uint64=18446744073709551615 Float64=1.7976931348623157e+308 Bool=true Time=1970-01-01T03:01:40.000+03:00 Duration=1s Any=val`
+
+func attrsToMap(attributes []attribute.KeyValue) map[attribute.Key]any {
+	out := make(map[attribute.Key]any, len(attributes))
+	for _, attr := range attributes {
+		out[attr.Key] = attr.Value.AsInterface()
 	}
 
-	for _, tt := range cases {
-		t.Run(tt.name, func(t *testing.T) {
-			actual := safeLevel(tt.level)
-			require.Equal(t, tt.expect, actual)
-		})
-	}
+	return out
 }
 
-func TestDefault(t *testing.T) {
-	require.NotPanics(t, func() {
-		Default().With("key", "val").Info("test")
-	})
-}
+func Test_Logger(t *testing.T) {
+	sr := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(
+		sdktrace.WithSpanProcessor(sr),
+		sdktrace.WithIDGenerator(stubIDGenerator(1)))
 
-func TestForTests(t *testing.T) {
-	require.NotPanics(t, func() {
-		ForTests(t).With("key", "val").Info("test")
-	})
-}
+	tracer := provider.Tracer("test")
 
-func TestSugaredLogger(t *testing.T) {
-	require.NotPanics(t, func() {
-		require.IsType(t, &SugaredLogger{}, ForTests(t).Sugar())
-	})
-}
-
-func TestWithCustomOutput(t *testing.T) {
-	require.Panics(t, func() {
-		_, err := New(Config{}, WithCustomOutput("unsupported_format", &fakeSink{Writer: io.Discard}))
-		require.NoError(t, err)
-	})
-}
-
-func TestConfig_Validate(t *testing.T) {
-	var empty int
-	cases := []struct {
-		name   string
-		config Config
-		error  error
-	}{
-		{
-			name: "valid config",
-			config: Config{
-				Level: zapcore.InfoLevel.String(),
-				Trace: zapcore.FatalLevel.String(),
-			},
-		},
-		{
-			name: "fail for invalid sample rate",
-			config: Config{
-				Level:      zapcore.InfoLevel.String(),
-				Trace:      zapcore.FatalLevel.String(),
-				SampleRate: new(int),
-			},
-			error: validation.Errors{
-				"SampleRate": (validation.ErrorObject{}).
-					SetCode("validation_nil_or_not_empty_required").
-					SetMessage("cannot be blank"),
-			},
-		},
-		{
-			name: "fail for empty sample rate",
-			config: Config{
-				Level:      zapcore.InfoLevel.String(),
-				Trace:      zapcore.FatalLevel.String(),
-				SampleRate: &empty,
-			},
-			error: validation.Errors{
-				"SampleRate": (validation.ErrorObject{}).
-					SetCode("validation_nil_or_not_empty_required").
-					SetMessage("cannot be blank"),
-			},
-		},
-		{
-			name: "fail for invalid level value",
-			config: Config{
-				Level:      "unknown",
-				Trace:      zapcore.FatalLevel.String(),
-				SampleRate: &defaultSampleRate,
-			},
-			error: validation.Errors{
-				"Level": (validation.ErrorObject{}).
-					SetCode("validation_in_invalid").
-					SetMessage("must be a valid value"),
-			},
-		},
-		{
-			name: "fail for invalid trace level value",
-			config: Config{
-				Trace:      "unknown",
-				Level:      zapcore.FatalLevel.String(),
-				SampleRate: &defaultSampleRate,
-			},
-			error: validation.Errors{
-				"Trace": (validation.ErrorObject{}).
-					SetCode("validation_in_invalid").
-					SetMessage("must be a valid value"),
-			},
-		},
-	}
-
-	for _, tt := range cases {
-		t.Run(tt.name, func(t *testing.T) {
-			require.Equal(t, tt.error, tt.config.Validate(context.Background()), tt.config.Validate(context.Background()))
-		})
-	}
-}
-
-func shouldFailOnBuildLogger() Option {
-	return func(l *logger) {
-		l.config.EncoderConfig.TimeKey = "should return an error"
-		l.config.EncoderConfig.EncodeTime = nil
-	}
-}
-
-type fakeSink struct{ io.Writer }
-
-func (f *fakeSink) Close() error { return nil }
-
-func (f *fakeSink) Sync() error { return nil }
-
-func TestNew(t *testing.T) {
-	cases := []struct {
-		name   string
-		config Config
-		output []string
-		option []Option
-		error  error
-	}{
-		{
-			name: "should be ok",
-			config: Config{
-				Level: zapcore.InfoLevel.String(),
-				Trace: zapcore.FatalLevel.String(),
-			},
-
-			output: []string{
-				`timestamp`,
-				// default logger
-				`"level":"error"`,
-				`"level":"info"`,
-				`hello world`,
-				`"app":"app-name"`,
-				`"version":"app-version"`,
-				`"key":"val"`,
-				// errors
-				`"error":"test-error"`,
-				// custom logger:
-				`"logger":"custom-name"`,
-				`"msg":"custom logger info message"`,
-			},
-
-			option: []Option{
-				WithAppName("app-name"),
-				WithAppVersion("app-version"),
-				WithTimeKey("timestamp"),
-				WithZapOption(zap.WithCaller(true)),
-			},
-		},
-
-		{
-			name: "should fail on build logger",
-			config: Config{
-				EncodingConsole: true,
-				Level:           zapcore.InfoLevel.String(),
-				Trace:           zapcore.FatalLevel.String(),
-			},
-
-			error:  errors.New("missing EncodeTime in EncoderConfig"),
-			option: []Option{shouldFailOnBuildLogger(), WithConsoleColored()},
-		},
-	}
+	ctx, span := tracer.Start(context.TODO(), "main")
 
 	buf := new(bytes.Buffer)
-	for _, tt := range cases {
-		t.Run(tt.name, func(t *testing.T) {
-			defer buf.Reset()
+	log := ForTests(TestLoggerWriter(buf))
 
-			// current, err := os.Getwd()
-			// require.NoError(t, err)
-			//
-			// defer func() {
-			// 	name := strings.ReplaceAll(tt.name, " ", "-")
-			// 	require.NoError(t, os.Remove(path.Join(current, name)))
-			// }()
+	log.WithGroup("group").Info("group test", String("key", "value"))
 
-			level := zap.NewAtomicLevelAt(zapcore.DebugLevel)
-			re := regexp.MustCompile(`[^\w\-]`)
-			name := re.ReplaceAllString(tt.name, "-")
+	log.InfoContext(context.TODO(), "test1", Err(nil))
+	log.Info("test2", NamedError("err", nil))
 
-			tt.option = append(tt.option,
-				WithCustomOutput(name, &fakeSink{Writer: buf}),
-				WithCustomLevel(level))
+	log.Info("test3", Err(fmt.Errorf("test error")))
+	log.Info("test3", NamedError("err", fmt.Errorf("test error")))
 
-			log, err := New(tt.config, tt.option...)
-			require.Equal(t, tt.error, err)
+	Named(log, "service").Info("message from some service", String("key", "value"))
 
-			if tt.error == nil {
-				log.With(zap.Error(errors.New("test-error"))).
-					With(zap.String("key", "val")).
-					Error("hello world")
+	log.ErrorContext(AddContextAttrs(ctx, String("ctxKey", "ctxVal")), "tracing message", Err(context.Canceled))
 
-				log.Named("custom-name").
-					With(zap.NamedError(another, nil)).
-					Info("custom logger info message")
+	log.With([]any{
+		String("String", "string-value"),
+		Int64("Int64", math.MaxInt64),
+		Int("Int", math.MaxInt),
+		Uint64("Uint64", math.MaxUint64),
+		Float64("Float64", math.MaxFloat64),
+		Bool("Bool", true),
+		Time("Time", time.Unix(100, 0)),
+		Duration("Duration", time.Second),
+		Any("Any", "val"),
+	}...).Info("message with multi attributes")
 
-				log.Std().Println("hello world")
+	out := buf.String()
+	require.Equal(t, strings.TrimSpace(attributesLogExpected), strings.TrimSpace(out))
 
-				out := buf.String()
+	span.End()
+	spans := sr.Ended()
+	require.Equal(t, 1, len(spans))
 
-				t.Logf("Output:\n%s", out)
-				require.NotContainsf(t, out, another, "should not contains %q", another)
+	events := spans[0].Events()
+	require.Equal(t, 1, len(events))
 
-				for i := range tt.output {
-					msg := tt.output[i]
+	event := events[0]
+	require.Equal(t, "log", event.Name)
 
-					t.Run("should contains "+msg, func(t *testing.T) {
-						require.Containsf(t, out, msg, "should contains %q", msg)
-					})
-				}
-			}
-		})
+	values := attrsToMap(event.Attributes)
+	require.Contains(t, values, LogSeverityKey)
+	require.Equal(t, slog.LevelError.String(), values[LogSeverityKey])
+
+	require.Contains(t, values, LogMessageKey)
+	require.Equal(t, "tracing message", values[LogMessageKey])
+
+	require.Contains(t, values, semconv.CodeFunctionKey)
+	require.Contains(t, values[semconv.CodeFunctionKey], "go-bones/logger.Test_Logger")
+
+	require.Contains(t, values, semconv.CodeFilepathKey)
+	require.Contains(t, values[semconv.CodeFilepathKey], "go-bones/logger/logger_test.go")
+}
+
+const testLoggerConfig = `
+logger:
+  open-tracing: true
+  secrets: [secret, password]
+`
+
+func errGetter[K comparable](_ K, err error) error {
+	return err
+}
+
+func TestWithConfig(t *testing.T) {
+	var example struct {
+		config.Base `yaml:",inline" env:",squash"`
+
+		ConfigPath string `flag:"config,short:c,config:true"`
 	}
+
+	file, err := os.CreateTemp(t.TempDir(), "config.yaml")
+	require.NoError(t, err)
+	require.NoError(t, errGetter(file.WriteString(testLoggerConfig)))
+	require.NoError(t, file.Close())
+
+	require.NoError(t,
+		config.Load(&example,
+			config.WithName("test"),
+			config.WithVersion("dev"),
+			config.WithCustomizeLoaderConfig(func(c *gonfig.Config) {
+				c.Args = append(c.Args, "--config", file.Name())
+			})))
+
+	spew.Dump(example)
+}
+
+type testHandler struct {
+	Handler
+	mock.Mock
+}
+
+func (t *testHandler) WithAttrs(attrs []Attr) slog.Handler {
+	t.Called(attrs)
+
+	return t.Handler.WithAttrs(attrs)
+}
+
+func Test_applyHandler(t *testing.T) {
+	t.Run("should call with attrs", func(t *testing.T) {
+		var conf config.Logger
+		conf.SetAppNameAndVersion("test-app-name", "test-app-version")
+
+		handler := new(testHandler)
+		handler.Test(t)
+		handler.Handler = slog.NewTextHandler(io.Discard, &HandlerOptions{Level: slog.LevelDebug})
+
+		handler.On(
+			"WithAttrs",
+			[]Attr{Group("app",
+				String("name", conf.AppName()),
+				String("version", conf.AppVersion()),
+			)},
+		).Once()
+
+		New(conf, handler).Info("call with attrs")
+	})
+
+	t.Run("should call without attrs", func(t *testing.T) { // should do nothing
+		var conf config.Logger
+
+		handler := new(testHandler)
+		handler.Test(t)
+		handler.Handler = slog.NewTextHandler(io.Discard, &HandlerOptions{Level: slog.LevelDebug})
+
+		New(conf, handler).Info("call without attrs")
+	})
 }

@@ -1,15 +1,19 @@
 package service
 
 import (
+	"errors"
 	"time"
+
+	"github.com/im-kulikov/go-bones/logger"
 )
 
-// Option allows customizing service module.
-type Option func(*runner)
+// Option represents a functional option for configuring the service settings.
+type Option func(*settings)
 
-// WithShutdownTimeout allows set shutdown timeout.
+// WithShutdownTimeout sets the timeout for graceful shutdown.
+// If the provided value is zero, it is ignored.
 func WithShutdownTimeout(v time.Duration) Option {
-	return func(g *runner) {
+	return func(g *settings) {
 		if v == 0 {
 			return
 		}
@@ -18,56 +22,66 @@ func WithShutdownTimeout(v time.Duration) Option {
 	}
 }
 
-// WithLoggerPingPong allows to set ping-pong timer for logger.
+// WithLoggerPingPong enables a periodic ping-pong log message.
+// If the interval is zero or negative, it is ignored.
 func WithLoggerPingPong(v time.Duration) Option {
-	return func(g *runner) {
+	return func(g *settings) {
 		if v <= 0 {
 			return
 		}
 
-		g.pingPongTimeout = v
-		g.pingPongDisable = false
+		g.logger.Info("ping pong service added")
+		g.append(newPingPong(g.logger, v))
 	}
 }
 
-// WithIgnoreError allows set ignored errors.
+// WithIgnoreError adds an error to the list of ignored errors.
+// If the provided error is nil, it is ignored.
 func WithIgnoreError(v error) Option {
-	return func(g *runner) {
+	return func(g *settings) {
 		if v == nil {
 			return
 		}
 
-		g.ignore = append(g.ignore, v)
+		g.ignore = errors.Join(g.ignore, v)
 	}
 }
 
-func (g *runner) append(v Service) {
+// append adds a service to the list of managed services,
+// ensuring that disabled services (implementing Enabler) are skipped.
+func (g *settings) append(v Service) {
+	if v == nil {
+		return
+	}
+
 	if svc, ok := v.(Enabler); ok && !svc.Enabled() {
-		g.logger.Warnw("service disabled", "service", v.Name())
+		g.logger.Warn("service disabled", logger.String("service", v.Name()))
 
 		return
 	}
 
-	g.services = append(g.services, v)
+	g.handle = append(g.handle, v)
 }
 
-// WithService allows set Service into Runner.
-func WithService(v Service) Option {
-	return func(g *runner) {
+// WithService adds one or more services to the runner.
+// If a Group is provided, all its services are added.
+func WithService(v ...Service) Option {
+	return func(g *settings) {
 		if v == nil {
 			return
 		}
 
-		if group, ok := v.(*Group); ok {
-			g.logger.Info("try to add group services")
+		for _, service := range v {
+			if svc, ok := service.(group); ok {
+				g.logger.Info("adding group services", logger.String("group", svc.Name()))
+				for _, item := range svc {
+					g.append(item)
+				}
 
-			for _, svc := range group.Services() {
-				g.append(svc)
+				return
 			}
 
-			return
+			g.append(service)
 		}
-
-		g.append(v)
 	}
 }

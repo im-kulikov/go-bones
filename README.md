@@ -1,13 +1,13 @@
-#  Golang bones
-
-<img src=".github/logo.png" width="250px" />
+![go-bones](.github/logo@2.png)
 
 ![Codecov](https://img.shields.io/codecov/c/github/im-kulikov/go-bones.svg?style=flat-square)
-[![Build Status](https://github.com/im-kulikov/go-bones/workflows/Go/badge.svg)](https://github.com/im-kulikov/go-bones/actions)
-[![Report](https://goreportcard.com/badge/github.com/im-kulikov/go-bones)](https://goreportcard.com/report/github.com/im-kulikov/go-bones)
+[![GitHub Workflow Status](https://github.com/im-kulikov/go-bones/actions/workflows/go.yml/badge.svg)](https://github.com/im-kulikov/go-bones/actions/workflows/go.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/im-kulikov/go-bones)](https://goreportcard.com/report/github.com/im-kulikov/go-bones)
+![Go version](https://img.shields.io/github/go-mod/go-version/im-kulikov/go-bones?style=flat&label=Go%20%3E%3D)
+[![PkgGoDev](https://pkg.go.dev/badge/mod/github.com/im-kulikov/go-bones)](https://pkg.go.dev/mod/github.com/im-kulikov/go-bones)
 [![GitHub release](https://img.shields.io/github/release/im-kulikov/go-bones.svg)](https://github.com/im-kulikov/go-bones)
 ![GitHub](https://img.shields.io/github/license/im-kulikov/go-bones.svg?style=popout)
-[![Dependabot Status](https://api.dependabot.com/badges/status?host=github&repo=im-kulikov/go-bones)](https://dependabot.com)
+[![Dependabot Status](https://img.shields.io/badge/dependabot-active-brightgreen?logo=dependabot)](https://dependabot.com)
 
 * [Makefile](#makefile)
 * [Examples](#examples)

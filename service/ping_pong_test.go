@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,12 +13,18 @@ import (
 )
 
 func TestPingPong(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*100)
 	defer cancel()
 
-	svc := newPingPong(logger.ForTests(t), time.Second)
+	var wg sync.WaitGroup
+	log := logger.ForTests()
+	svc := newPingPong(log, time.Millisecond*25)
 
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
+		<-ctx.Done()
+
 		// we should not panic on multiple call of stop
 		assert.NotPanics(t, func() {
 			svc.Stop(ctx)
@@ -26,5 +33,6 @@ func TestPingPong(t *testing.T) {
 		})
 	}()
 
-	require.NoError(t, svc.Start(ctx))
+	require.NoError(t, RunContext(ctx, log, WithService(svc)))
+	wg.Wait()
 }

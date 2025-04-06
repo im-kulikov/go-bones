@@ -1,28 +1,32 @@
 package service
 
-import "context"
+import (
+	"context"
+	"fmt"
+	"strings"
+)
 
-// Group allows to provide runner of services.
-type Group struct {
-	name string
-	opts []Service
-}
+type group []Service
 
 // Name used to implement Service interface.
-func (g *Group) Name() string { return g.name }
+func (g group) Name() string {
+	services := make([]string, 0, len(g))
+	for _, service := range g {
+		services = append(services, service.Name())
+	}
+
+	return fmt.Sprintf("group-of-services(%s)", strings.Join(services, ","))
+}
 
 // Stop used to implement Service interface.
-func (g *Group) Stop(context.Context) {}
+func (g group) Stop(context.Context) { panic("should not be called") }
 
 // Start used to implement Service interface.
-func (g *Group) Start(context.Context) error { return nil }
-
-// Services return multiple services.
-func (g *Group) Services() []Service { return g.opts }
+func (g group) Start(context.Context) error { panic("should not be called") }
 
 // NewGroup returns a group of services.
-func NewGroup(name string, services ...Service) Service {
-	out := &Group{name: name, opts: make([]Service, 0, len(services))}
+func NewGroup(services ...Service) Service {
+	out := make(group, 0, len(services))
 	for _, svc := range services {
 		if svc == nil {
 			continue
@@ -32,7 +36,7 @@ func NewGroup(name string, services ...Service) Service {
 			continue
 		}
 
-		out.opts = append(out.opts, svc)
+		out = append(out, svc)
 	}
 
 	return out

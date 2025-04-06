@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,11 +17,12 @@ type workers struct {
 	launchers []*worker
 }
 
-func newWorkers(log logger.Logger) *workers {
+func newWorkers(l *logger.Logger) *workers {
 	var launchers []*worker
 
 	for i := 0; i < 10; i++ {
 		num := fmt.Sprintf("worker_%02d", i)
+		log := logger.Named(l, num)
 
 		wrk := NewWorker(num, func(ctx context.Context) error {
 			tick := time.NewTicker(time.Millisecond * 25)
@@ -33,7 +35,9 @@ func newWorkers(log logger.Logger) *workers {
 				case <-ctx.Done():
 					return nil
 				case <-tick.C:
-					log.Infof("tick name:%s counter:%d", num, cnt)
+					log.InfoContext(ctx, "tick",
+						logger.String("name", num),
+						logger.Int("count", cnt))
 
 					cnt++
 				}
@@ -59,9 +63,23 @@ func (w *workers) Options() []Option {
 
 func Test_Workers(t *testing.T) {
 	t.Run("should fail on empty launcher", func(t *testing.T) {
-		require.EqualError(t,
-			NewWorker("simple", nil).Start(context.Background()),
-			errEmptyLauncher.Error())
+		require.ErrorIs(t,
+			NewWorker("simple", nil).Start(context.TODO()),
+			errEmptyLauncher)
+	})
+
+	t.Run("should not run worker on cancelled context", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.TODO())
+		cancel()
+
+		log := logger.ForTests()
+		wrk := NewWorker("simple", func(top context.Context) error {
+			<-top.Done()
+
+			return context.Cause(top)
+		})
+
+		require.NoError(t, RunContext(ctx, log, WithService(wrk)))
 	})
 
 	t.Run("should not be blocked", func(t *testing.T) {
@@ -73,21 +91,21 @@ func Test_Workers(t *testing.T) {
 			return nil
 		})
 
-		{ // when we stop without start, we should not wait
-			ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+		{ // when we stop without start, we should wait
+			ctx, cancel := context.WithTimeout(context.TODO(), time.Millisecond)
 			defer cancel()
 
 			now := time.Now()
 			require.NotPanics(t, func() { wrk.Stop(ctx) })
 
-			// should exit from worker.Stop immediately
-			require.Less(t, time.Since(now), time.Millisecond/2)
+			// should exit from worker.Stop on context.DeadlineExceeded
+			require.Greater(t, time.Since(now), time.Millisecond)
 		}
 
 		{ // when start and stop
 			now := time.Now()
 
-			ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*10)
+			ctx, cancel := context.WithTimeout(context.TODO(), time.Millisecond*10)
 			defer cancel()
 
 			go func() { assert.NoError(t, wrk.Start(ctx)) }()
@@ -100,15 +118,28 @@ func Test_Workers(t *testing.T) {
 	})
 
 	t.Run("should run multiple workers and stop all", func(t *testing.T) {
-		log := logger.ForTests(t)
+		log := logger.ForTests()
 		wrk := newWorkers(log)
-		grp := New(log, wrk.Options()...)
 
-		ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*100)
+		log.Info("test")
+
+		ctx, cancel := context.WithTimeout(context.TODO(), time.Millisecond*200)
 		defer cancel()
 
-		require.NoError(t, grp.Run(ctx))
+		var wg sync.WaitGroup
+		done := make(chan struct{})
 
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			close(done)
+			assert.NoError(t, RunContext(ctx, log, wrk.Options()...))
+		}()
+
+		<-done
 		<-ctx.Done()
+
+		wg.Wait()
 	})
 }

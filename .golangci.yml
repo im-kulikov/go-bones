@@ -1,11 +1,13 @@
+# // yaml-language-server: $schema=https://raw.githubusercontent.com/golangci/golangci-lint/refs/heads/main/jsonschema/golangci.next.jsonschema.json
+
+version: "2"
 linters:
-  enable-all: false
+  default: standard
   enable:
     - unparam
     - whitespace
     - unconvert
     - bodyclose
-    - gofmt
     - gocritic
     - godot
     - prealloc
@@ -13,67 +15,56 @@ linters:
     - unconvert
     - lll
     - cyclop
-    - gci
     - gosec
     - prealloc
-    - revive
     - gochecknoglobals
     - funlen
-  disable:
-    - errcheck
-    - ineffassign
+  disable: []
 
-linters-settings:
-  dupl:
-    threshold: 100
-  lll:
-    line-length: 140
-  cyclop:
-    max-complexity: 16
-    skip-tests: true
-  funlen:
-    lines: 70
-    statements: 40
-  gci:
-    sections:
-      # Standard section: captures all standard packages.
-      - standard
-      # Default section: contains all imports that could not be matched to another section type.
-      - default
-      # Custom section: groups all imports with the specified Prefix.
-      - prefix(github.com/im-kulikov/go-bones)
-issues:
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - gochecknoglobals
-        - funlen
-        - lll
-        - unparam
-        - govet
-    - path: config/config.go
-      linters:
-        - funlen
-        - gochecknoglobals
-  exclude-use-default: false
-  exclude:
-    # govet: Common false positives
-    - (possible misuse of unsafe.Pointer|should have signature)
+  exclusions:
+    rules:
+      # Exclude some linters from running on tests files.
+      - path: _test\.go
+        linters:
+          - gocyclo
+          - errcheck
+          - dupl
+          - gosec
+          - funlen
 
-    # gosec: Too many false-positives on 'unsafe' usage
-    - Use of unsafe calls should be audited
+run:
+  relative-path-mode: gomod # cfg, wd, gomod, gitroot.
 
-    # gosec: Too many false-positives for parametrized shell calls
-    - Subprocess launch(ed with variable|ing should be audited)
+formatters:
+  settings:
+    gci:
+      # Section configuration to compare against.
+      # Section names are case-insensitive and may contain parameters in ().
+      # The default order of sections is `standard > default > custom > blank > dot > alias > localmodule`,
+      # If `custom-order` is `true`, it follows the order of `sections` option.
+      # Default: ["standard", "default"]
+      sections:
+        - standard # Standard section: captures all standard packages.
+        - default # Default section: contains all imports that could not be matched to another section type.
+        - localmodule # Local module section: contains all local packages. This section is not present unless explicitly enabled.
+      # Checks that no inline comments are present.
+      # Default: false
+      no-inline-comments: true
+      # Checks that no prefix comments (comment lines above an import) are present.
+      # Default: false
+      no-prefix-comments: true
+      # Enable custom order of sections.
+      # If `true`, make the section order the same as the order of `sections`.
+      # Default: false
+      custom-order: true
+      # Drops lexical ordering for custom sections.
+      # Default: false
+      no-lex-order: true
 
-    # gosec: Duplicated errcheck checks
-    - G104
+  enable:
+    - gci
+    - gofmt
+    - gofumpt
+    - goimports
+    - golines
 
-    # gosec: Too many issues in popular repos
-    - (Expect directory permissions to be 0750 or less|Expect file permissions to be 0600 or less)
-
-    # gosec: False positive is triggered by 'src, err := ioutil.ReadFile(filename)'
-    - Potential file inclusion via variable
-
-    # revive: disable asking to add package-comments
-    - (should have a package comment)
