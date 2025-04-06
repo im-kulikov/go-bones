@@ -10,25 +10,27 @@ import (
 	"github.com/im-kulikov/go-bones"
 )
 
+// nolint:lll
 type TLS struct {
-	Enabled      bool     `toml:"enabled" yaml:"enabled" json:"enabled" env:"ENABLED" default:"false"`
-	CertFile     string   `toml:"cert_file" yaml:"cert_file" json:"certFile" env:"CERT_FILE"`
-	KeyFile      string   `toml:"key_file" yaml:"key_file" json:"keyFile" env:"KEY_FILE"`
-	ClientAuth   string   `toml:"client_auth" yaml:"client_auth" json:"clientAuth" env:"CLIENT_AUTH" default:"no-client-cert"`
-	CACertFile   string   `toml:"ca_cert_file" yaml:"ca_cert_file" json:"CACertFile" env:"CA_CERT_FILE"`
-	MinVersion   string   `toml:"min_version" yaml:"min_version" json:"minVersion" env:"MIN_VERSION" default:"TLS13"`
+	Enabled      bool     `toml:"enabled"       yaml:"enabled"       json:"enabled"      env:"ENABLED"       default:"false"`
+	CertFile     string   `toml:"cert_file"     yaml:"cert_file"     json:"certFile"     env:"CERT_FILE"`
+	KeyFile      string   `toml:"key_file"      yaml:"key_file"      json:"keyFile"      env:"KEY_FILE"`
+	ClientAuth   string   `toml:"client_auth"   yaml:"client_auth"   json:"clientAuth"   env:"CLIENT_AUTH"   default:"no-client-cert"`
+	CACertFile   string   `toml:"ca_cert_file"  yaml:"ca_cert_file"  json:"CACertFile"   env:"CA_CERT_FILE"`
+	MinVersion   string   `toml:"min_version"   yaml:"min_version"   json:"minVersion"   env:"MIN_VERSION"   default:"TLS13"`
 	CipherSuites []string `toml:"cipher_suites" yaml:"cipher_suites" json:"cipherSuites" env:"CIPHER_SUITES"`
 }
 
+// nolint:lll
 type BaseHTTP struct {
 	appSettings
 
-	TLSConfig         *TLS          `toml:"tls" yaml:"tls" json:"tls" env:"TLS"`
-	ReadTimeout       time.Duration `toml:"read_timeout" yaml:"read_timeout" json:"readTimeout" env:"READ_TIMEOUT"`
-	WriteTimeout      time.Duration `toml:"write_timeout" yaml:"write_timeout" json:"writeTimeout" env:"WRITE_TIMEOUT"`
+	TLSConfig         *TLS          `toml:"tls"                 yaml:"tls"                 json:"tls"               env:"TLS"`
+	ReadTimeout       time.Duration `toml:"read_timeout"        yaml:"read_timeout"        json:"readTimeout"       env:"READ_TIMEOUT"`
+	WriteTimeout      time.Duration `toml:"write_timeout"       yaml:"write_timeout"       json:"writeTimeout"      env:"WRITE_TIMEOUT"`
 	ReadHeaderTimeout time.Duration `toml:"read_header_timeout" yaml:"read_header_timeout" json:"readHeaderTimeout" env:"READ_HEADER_TIMEOUT"`
-	IdleTimeout       time.Duration `toml:"idle_timeout" yaml:"idle_timeout" json:"idleTimeout" env:"IDLE_TIMEOUT"`
-	MaxHeaderBytes    int           `toml:"max_header_bytes" yaml:"max_header_bytes" json:"maxHeaderBytes" env:"MAX_HEADER_BYTES"`
+	IdleTimeout       time.Duration `toml:"idle_timeout"        yaml:"idle_timeout"        json:"idleTimeout"       env:"IDLE_TIMEOUT"`
+	MaxHeaderBytes    int           `toml:"max_header_bytes"    yaml:"max_header_bytes"    json:"maxHeaderBytes"    env:"MAX_HEADER_BYTES"`
 }
 
 type HTTP struct {
@@ -37,12 +39,14 @@ type HTTP struct {
 	Address string `json:"address" yaml:"address" env:"ADDRESS"`
 }
 
+// nolint:lll
 type Ops struct {
 	BaseHTTP `yaml:",inline" env:",squash"`
 
-	Address     string `yaml:"address" json:"address" env:"ADDRESS" default:":8090"`
-	MetricsPath string `json:"metrics_path" yaml:"metrics_path" env:"METRICS_PATH" default:"/metrics"`
-	ProfilePath string `json:"profile_path" yaml:"profile_path" env:"PROFILE_PATH" default:"/debug/pprof"`
+	Address     string `tom;:"address"       yaml:"address"       json:"address"       env:"ADDRESS"       default:":8090"`
+	MetricsPath string `tom;:"metrics_path"  yaml:"metrics_path"  json:"metrics_path"  env:"METRICS_PATH"  default:"/metrics"`
+	ProfilePath string `tom;:"profile_path"  yaml:"profile_path"  json:"profile_path"  env:"PROFILE_PATH"  default:"/debug/pprof"`
+	ExpVarsPath string `tom;:"exp_vars_path" yaml:"exp_vars_path" json:"exp_vars_path" env:"EXP_VARS_PATH" default:"/debug/vars"`
 }
 
 type HTTPConfig interface {
@@ -92,7 +96,12 @@ func (c BaseHTTP) PrepareTLSConfig() (*tls.Config, error) {
 	}
 
 	if c.TLSConfig.CertFile == "" || c.TLSConfig.KeyFile == "" {
-		return nil, fmt.Errorf("%w: cert=%q, key=%q", ErrTLSEmptyKeyPair, c.TLSConfig.CertFile, c.TLSConfig.KeyFile)
+		return nil, fmt.Errorf(
+			"%w: cert=%q, key=%q",
+			ErrTLSEmptyKeyPair,
+			c.TLSConfig.CertFile,
+			c.TLSConfig.KeyFile,
+		)
 	}
 
 	var err error

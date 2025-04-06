@@ -82,7 +82,11 @@ func Test_Logger(t *testing.T) {
 
 	Named(log, "service").Info("message from some service", String("key", "value"))
 
-	log.ErrorContext(AddContextAttrs(ctx, String("ctxKey", "ctxVal")), "tracing message", Err(context.Canceled))
+	log.ErrorContext(
+		AddContextAttrs(ctx, String("ctxKey", "ctxVal")),
+		"tracing message",
+		Err(context.Canceled),
+	)
 
 	log.With([]any{
 		String("String", "string-value"),

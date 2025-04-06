@@ -20,7 +20,10 @@ const ErrOsSignal = bones.Error("received signal")
 
 // SignalContext creates a context that is canceled when one of the specified signals is received.
 // This function serves as an alternative to signal.NotifyContext but provides better introspection.
-func SignalContext(top context.Context, signals ...os.Signal) (context.Context, context.CancelFunc) {
+func SignalContext(
+	top context.Context,
+	signals ...os.Signal,
+) (context.Context, context.CancelFunc) {
 	ctx, cancel, handle := signalContextRoutine(top, signals...)
 	go handle()
 	return ctx, func() { cancel(ErrCancelCalled) }
@@ -33,7 +36,10 @@ func ErrReceivedSignal(sig os.Signal) error {
 
 // signalContextRoutine creates a signal-aware context and returns a handler function
 // that listens for termination signals and cancels the context accordingly.
-func signalContextRoutine(top context.Context, signals ...os.Signal) (context.Context, context.CancelCauseFunc, handler) {
+func signalContextRoutine(
+	top context.Context,
+	signals ...os.Signal,
+) (context.Context, context.CancelCauseFunc, handler) {
 	ctx, cancel := context.WithCancelCause(top)
 
 	out := make(chan os.Signal, 1)

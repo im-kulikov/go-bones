@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -14,17 +15,17 @@ import (
 )
 
 type workers struct {
-	launchers []*worker
+	launchers []*launcher
 }
 
-func newWorkers(l *logger.Logger) *workers {
-	var launchers []*worker
+func newWorkers(l *logger.Logger, shutdown ...func(context.Context)) *workers {
+	var launchers []*launcher
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		num := fmt.Sprintf("worker_%02d", i)
 		log := logger.Named(l, num)
 
-		wrk := NewWorker(num, func(ctx context.Context) error {
+		wrk := NewLauncher(num, func(ctx context.Context) error {
 			tick := time.NewTicker(time.Millisecond * 25)
 			defer tick.Stop()
 
@@ -42,9 +43,9 @@ func newWorkers(l *logger.Logger) *workers {
 					cnt++
 				}
 			}
-		})
+		}, shutdown...)
 
-		launchers = append(launchers, wrk.(*worker))
+		launchers = append(launchers, wrk.(*launcher))
 	}
 
 	return &workers{launchers: launchers}
@@ -64,16 +65,16 @@ func (w *workers) Options() []Option {
 func Test_Workers(t *testing.T) {
 	t.Run("should fail on empty launcher", func(t *testing.T) {
 		require.ErrorIs(t,
-			NewWorker("simple", nil).Start(context.TODO()),
-			errEmptyLauncher)
+			NewLauncher("simple", nil).Start(context.TODO()),
+			ErrEmptyLauncher)
 	})
 
-	t.Run("should not run worker on cancelled context", func(t *testing.T) {
+	t.Run("should not run launcher on cancelled context", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.TODO())
 		cancel()
 
 		log := logger.ForTests()
-		wrk := NewWorker("simple", func(top context.Context) error {
+		wrk := NewLauncher("simple", func(top context.Context) error {
 			<-top.Done()
 
 			return context.Cause(top)
@@ -83,7 +84,7 @@ func Test_Workers(t *testing.T) {
 	})
 
 	t.Run("should not be blocked", func(t *testing.T) {
-		wrk := NewWorker("test", func(ctx context.Context) error {
+		wrk := NewLauncher("test", func(ctx context.Context) error {
 			<-ctx.Done()
 
 			time.Sleep(time.Second)
@@ -98,7 +99,7 @@ func Test_Workers(t *testing.T) {
 			now := time.Now()
 			require.NotPanics(t, func() { wrk.Stop(ctx) })
 
-			// should exit from worker.Stop on context.DeadlineExceeded
+			// should exit from launcher.Stop on context.DeadlineExceeded
 			require.Greater(t, time.Since(now), time.Millisecond)
 		}
 
@@ -113,7 +114,12 @@ func Test_Workers(t *testing.T) {
 			<-time.After(time.Millisecond * 5)
 
 			require.NotPanics(t, func() { wrk.Stop(ctx) })
-			require.InDelta(t, time.Since(now), time.Millisecond*12, float64(time.Millisecond*5)) // 5ms lags
+			require.InDelta(
+				t,
+				time.Since(now),
+				time.Millisecond*12,
+				float64(time.Millisecond*5),
+			) // 5ms lags
 		}
 	})
 
@@ -142,4 +148,22 @@ func Test_Workers(t *testing.T) {
 
 		wg.Wait()
 	})
+}
+
+func Test_onShutdown(t *testing.T) {
+	var inc atomic.Int32
+
+	fun := func(context.Context) {
+		t.Helper()
+		assert.NotEmpty(t, inc.Add(1))
+	}
+
+	log := logger.ForTests()
+	wrk := newWorkers(log, fun)
+	ctx, cancel := context.WithTimeout(context.TODO(), time.Millisecond*100)
+	defer cancel()
+
+	options := wrk.Options()
+	require.NoError(t, RunContext(ctx, log, options...))
+	require.Equal(t, int32(len(wrk.launchers)), inc.Load())
 }

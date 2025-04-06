@@ -10,7 +10,7 @@ import (
 const pingPongServiceName = "ping-pong"
 
 func newPingPong(l *logger.Logger, timeout time.Duration) Service {
-	return NewWorker(pingPongServiceName, func(ctx context.Context) error {
+	return NewLauncher(pingPongServiceName, func(ctx context.Context) error {
 		log := logger.Named(l, pingPongServiceName)
 
 		timer := time.NewTimer(timeout)

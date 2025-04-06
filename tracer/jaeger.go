@@ -12,10 +12,8 @@ type jaegerSettings struct {
 func (j jaegerSettings) exporterOptions() {}
 
 func newJaegerExporter(cfg settings) {
-
-	var test jaegerSettings // ...................................................................................................
+	var test jaegerSettings
 	resource.NewSchemaless(semconv.ServiceNameKey.String("otlp"))
 
 	_ = test
-
 }

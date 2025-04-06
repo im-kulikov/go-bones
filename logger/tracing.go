@@ -51,7 +51,11 @@ func openTracingTransform(ctx context.Context, original slog.Record) slog.Record
 		return original
 	}
 
-	attrs := make([]attribute.KeyValue, 0, original.NumAttrs()+5) // 2 (severity, message) + 3 (func,file,line).
+	attrs := make(
+		[]attribute.KeyValue,
+		0,
+		original.NumAttrs()+5,
+	) // 2 (severity, message) + 3 (func,file,line).
 
 	attrs = append(attrs, LogSeverityKey.String(original.Level.String()))
 	attrs = append(attrs, LogMessageKey.String(original.Message))

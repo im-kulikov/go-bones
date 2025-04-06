@@ -24,9 +24,10 @@ type mockService struct {
 }
 
 func isMethodCalled(m *mock.Mock, methodName string) bool {
-	return len(m.ExpectedCalls) > 0 && slices.ContainsFunc(m.ExpectedCalls, func(call *mock.Call) bool {
-		return call.Method == methodName
-	})
+	return len(m.ExpectedCalls) > 0 &&
+		slices.ContainsFunc(m.ExpectedCalls, func(call *mock.Call) bool {
+			return call.Method == methodName
+		})
 }
 
 func (m *mockService) Name() string {

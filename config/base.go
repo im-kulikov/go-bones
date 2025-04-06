@@ -9,7 +9,7 @@ import (
 
 type Base struct {
 	Logger    Logger `env:"LOGGER" yaml:"logger" json:"logger" toml:"logger"`
-	OpsServer Ops    `env:"OPS" yaml:"ops" json:"ops" toml:"ops"`
+	OpsServer Ops    `env:"OPS"    yaml:"ops"    json:"ops"    toml:"ops"`
 }
 
 type appSettings struct {
@@ -53,7 +53,8 @@ func setAppSettings(v any, name, version string) error {
 func setAppSettingsRecursive(val reflect.Value, name, version string) {
 	for i := 0; i < val.NumField(); i++ {
 		field := val.Field(i)
-		if field.Kind() != reflect.Struct || !field.IsValid() || !field.CanInterface() || !field.CanAddr() {
+		if field.Kind() != reflect.Struct || !field.IsValid() || !field.CanInterface() ||
+			!field.CanAddr() {
 			continue
 		}
 
