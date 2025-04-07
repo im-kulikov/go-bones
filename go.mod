@@ -3,7 +3,7 @@ module github.com/im-kulikov/go-bones
 go 1.20
 
 require (
-	github.com/cristalhq/aconfig v0.18.5
+	github.com/cristalhq/aconfig v0.18.6
 	github.com/cristalhq/aconfig/aconfigdotenv v0.17.1
 	github.com/go-ozzo/ozzo-validation/v4 v4.3.0
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
@@ -32,6 +32,7 @@ require (
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
+	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/prometheus/client_model v0.4.0 // indirect
 	github.com/prometheus/common v0.44.0 // indirect
