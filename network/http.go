@@ -2,10 +2,10 @@ package network
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"net"
 	"net/http"
-	"time"
 
 	"github.com/im-kulikov/go-bones"
 	"github.com/im-kulikov/go-bones/config"
@@ -13,8 +13,13 @@ import (
 	"github.com/im-kulikov/go-bones/service"
 )
 
+type ListenOpener interface {
+	Listen(ctx context.Context, address, network string) (net.Listener, error)
+}
+
 type httpOptions struct {
 	name string
+	open ListenOpener
 	base config.BaseHTTP
 
 	*http.Server
@@ -81,13 +86,30 @@ func NewHTTPServer(
 	}
 
 	return service.NewLauncher(options.name, options.listen, func(ctx context.Context) {
-		if errShutdown := options.Shutdown(ctx); errShutdown != nil {
-			options.Error("could not shutdown http service",
-				logger.String("service", options.name),
-				logger.String("address", options.Addr),
-				logger.Err(errShutdown))
-		}
+		options.InfoContext(ctx, "shutdown http service",
+			logger.String("service", options.name),
+			logger.String("address", options.Addr))
 	}), nil
+}
+
+func newHTTPServer(c config.HTTPConfig) (*http.Server, error) {
+	var err error
+	base := c.Base()
+
+	var cfg *tls.Config
+	if cfg, err = base.PrepareTLSConfig(); err != nil && !errors.Is(err, config.ErrTLSDisabled) {
+		return nil, err
+	}
+
+	return &http.Server{
+		Addr:              c.Addr(),
+		TLSConfig:         cfg,
+		ReadTimeout:       base.ReadTimeout,
+		ReadHeaderTimeout: base.ReadHeaderTimeout,
+		WriteTimeout:      base.WriteTimeout,
+		IdleTimeout:       base.IdleTimeout,
+		MaxHeaderBytes:    base.MaxHeaderBytes,
+	}, nil
 }
 
 func prepareHTTPServer(
@@ -96,12 +118,18 @@ func prepareHTTPServer(
 	handler http.Handler,
 	opts ...HTTPOption,
 ) (*httpOptions, error) {
-	srv, err := cfg.PrepareHTTPServer()
+	srv, err := newHTTPServer(cfg)
 	if err != nil {
 		return nil, err
 	}
 
-	options := &httpOptions{name: defaultHTTPServiceName, Logger: log, Server: srv}
+	options := &httpOptions{
+		Logger: log,
+		Server: srv,
+		base:   cfg.Base(),
+		open:   new(net.ListenConfig),
+		name:   defaultHTTPServiceName,
+	}
 	for _, opt := range opts {
 		opt(options)
 	}
@@ -131,7 +159,7 @@ func (h *httpOptions) serve() error {
 }
 
 func (h *httpOptions) listen(top context.Context) error {
-	if lis, err := new(net.ListenConfig).Listen(top, defaultHTTPNetwork, h.Addr); err != nil {
+	if lis, err := h.open.Listen(top, defaultHTTPNetwork, h.Addr); err != nil {
 		return errors.Join(ErrHTTPCheckListener, err)
 	} else if h.Addr, err = lis.Addr().String(), lis.Close(); err != nil {
 		return errors.Join(ErrHTTPCloseListener, err)
@@ -148,7 +176,7 @@ func (h *httpOptions) listen(top context.Context) error {
 
 	<-ctx.Done()
 	{ // shutdown http.Server
-		out, done := context.WithTimeout(context.TODO(), time.Second*30)
+		out, done := context.WithTimeout(context.Background(), h.base.ShutdownTimeout)
 		defer done()
 
 		if err := h.Shutdown(out); err != nil {

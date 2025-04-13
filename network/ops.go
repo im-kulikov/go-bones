@@ -85,5 +85,10 @@ func NewOPSServer(cfg config.Ops, log *logger.Logger) (service.Service, error) {
 	mux.HandleFunc(cfg.ProfilePath+"/symbol", pprof.Symbol)
 	mux.HandleFunc(cfg.ProfilePath+"/trace", pprof.Trace)
 
-	return NewHTTPServer(cfg, log, mux, HTTPServiceName(defaultOPSServiceName))
+	return NewHTTPServer(
+		cfg,
+		log,
+		mux,
+		HTTPServiceName(defaultOPSServiceName),
+	)
 }

@@ -4,7 +4,6 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"net/http"
 	"time"
 
 	"github.com/im-kulikov/go-bones"
@@ -30,37 +29,41 @@ type BaseHTTP struct {
 	WriteTimeout      time.Duration `toml:"write_timeout"       yaml:"write_timeout"       json:"writeTimeout"      env:"WRITE_TIMEOUT"`
 	ReadHeaderTimeout time.Duration `toml:"read_header_timeout" yaml:"read_header_timeout" json:"readHeaderTimeout" env:"READ_HEADER_TIMEOUT"`
 	IdleTimeout       time.Duration `toml:"idle_timeout"        yaml:"idle_timeout"        json:"idleTimeout"       env:"IDLE_TIMEOUT"`
+	ShutdownTimeout   time.Duration `toml:"shutdown_timeout"    yaml:"shutdown_timeout"    json:"shutdownTimeout"   env:"SHUTDOWN_TIMEOUT"    default:"30s"`
 	MaxHeaderBytes    int           `toml:"max_header_bytes"    yaml:"max_header_bytes"    json:"maxHeaderBytes"    env:"MAX_HEADER_BYTES"`
 }
 
-type HTTP struct {
-	BaseHTTP `yaml:",inline" env:",squash"`
-
-	Address string `json:"address" yaml:"address" env:"ADDRESS"`
-}
-
+// Ops contains settings for OPS server.
 // nolint:lll
 type Ops struct {
-	BaseHTTP `yaml:",inline" env:",squash"`
-
-	Address     string `tom;:"address"       yaml:"address"       json:"address"       env:"ADDRESS"       default:":8090"`
-	MetricsPath string `tom;:"metrics_path"  yaml:"metrics_path"  json:"metrics_path"  env:"METRICS_PATH"  default:"/metrics"`
-	ProfilePath string `tom;:"profile_path"  yaml:"profile_path"  json:"profile_path"  env:"PROFILE_PATH"  default:"/debug/pprof"`
-	ExpVarsPath string `tom;:"exp_vars_path" yaml:"exp_vars_path" json:"exp_vars_path" env:"EXP_VARS_PATH" default:"/debug/vars"`
+	BaseHTTP    `       yaml:",inline"       env:",squash"`
+	Address     string `yaml:"address"       env:"ADDRESS"       tom;:"address"       json:"address"       default:":8090"`
+	MetricsPath string `yaml:"metrics_path"  env:"METRICS_PATH"  tom;:"metrics_path"  json:"metrics_path"  default:"/metrics"`
+	ProfilePath string `yaml:"profile_path"  env:"PROFILE_PATH"  tom;:"profile_path"  json:"profile_path"  default:"/debug/pprof"`
+	ExpVarsPath string `yaml:"exp_vars_path" env:"EXP_VARS_PATH" tom;:"exp_vars_path" json:"exp_vars_path" default:"/debug/vars"`
 }
 
+// HTTPConfig an interface for http settings.
 type HTTPConfig interface {
 	Addr() string
 	Base() BaseHTTP
-	PrepareHTTPServer() (*http.Server, error)
 }
 
 const (
-	ErrTLSDisabled          bones.Error = "TLS disabled"
-	ErrTLSEmptyKeyPair      bones.Error = "TLS empty keypair"
-	ErrUnknownTLSVersion    bones.Error = "unknown TLS version"
+	// ErrTLSDisabled fires when tls disabled.
+	ErrTLSDisabled bones.Error = "TLS disabled"
+
+	// ErrTLSEmptyKeyPair fires when TLS.CertFile or TLS.KeyFile is empty.
+	ErrTLSEmptyKeyPair bones.Error = "TLS empty keypair"
+
+	// ErrUnknownTLSVersion fires when TLS.MinVersion is unknown.
+	ErrUnknownTLSVersion bones.Error = "unknown TLS version"
+
+	// ErrUnknownTLSClientAuth fires when TLS.ClientAuth is unknown.
 	ErrUnknownTLSClientAuth bones.Error = "unknown TLS client auth type"
-	ErrTLSLoadX509KeyPair   bones.Error = "could not load X509 key pair"
+
+	// ErrTLSLoadX509KeyPair fires when could not load tls.X509KeyPair.
+	ErrTLSLoadX509KeyPair bones.Error = "could not load X509 key pair"
 )
 
 // nolint:gochecknoglobals
@@ -80,16 +83,13 @@ var tlsVersions = map[string]uint16{
 	"TLS10": tls.VersionTLS10,
 }
 
+// Base settings for http.Server.
 func (c BaseHTTP) Base() BaseHTTP { return c }
 
+// Addr for http.Server.
 func (c Ops) Addr() string { return c.Address }
 
-func (c HTTP) Addr() string { return c.Address }
-
-func (c Ops) PrepareHTTPServer() (*http.Server, error) { return httpServerSettings(c) }
-
-func (c HTTP) PrepareHTTPServer() (*http.Server, error) { return httpServerSettings(c) }
-
+// PrepareTLSConfig creates tls.Config from settings.
 func (c BaseHTTP) PrepareTLSConfig() (*tls.Config, error) {
 	if c.TLSConfig == nil || !c.TLSConfig.Enabled {
 		return nil, ErrTLSDisabled
@@ -127,25 +127,5 @@ func (c BaseHTTP) PrepareTLSConfig() (*tls.Config, error) {
 		Certificates: certificates[:],
 		ClientAuth:   clientAuthMap[c.TLSConfig.ClientAuth],
 		MinVersion:   minVersion,
-	}, nil
-}
-
-func httpServerSettings(c HTTPConfig) (*http.Server, error) {
-	var err error
-	base := c.Base()
-
-	var cfg *tls.Config
-	if cfg, err = base.PrepareTLSConfig(); err != nil && !errors.Is(err, ErrTLSDisabled) {
-		return nil, err
-	}
-
-	return &http.Server{
-		Addr:              c.Addr(),
-		TLSConfig:         cfg,
-		ReadTimeout:       base.ReadTimeout,
-		ReadHeaderTimeout: base.ReadHeaderTimeout,
-		WriteTimeout:      base.WriteTimeout,
-		IdleTimeout:       base.IdleTimeout,
-		MaxHeaderBytes:    base.MaxHeaderBytes,
 	}, nil
 }

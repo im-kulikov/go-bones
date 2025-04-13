@@ -58,7 +58,7 @@ var (
 // Returns:
 //   - error: An error if any of the managed goroutines fail to start or stop properly.
 func Run(log *logger.Logger, options ...Option) error {
-	return RunContext(context.TODO(), log, options...)
+	return RunContext(context.Background(), log, options...)
 }
 
 // RunContext starts multiple goroutines and ensures their graceful shutdown,

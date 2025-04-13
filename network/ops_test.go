@@ -38,14 +38,16 @@ func Test_opsServer(t *testing.T) {
 		syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	defer cancel()
 
+	done := make(chan struct{})
+	wait := new(sync.WaitGroup)
+	wait.Add(2)
+
 	go func() {
+		defer wait.Done()
+
 		<-ctx.Done()
 		ops.Stop(context.TODO())
 	}()
-
-	done := make(chan struct{})
-	wait := new(sync.WaitGroup)
-	wait.Add(1)
 
 	go func() {
 		defer wait.Done()
@@ -66,7 +68,12 @@ func Test_opsServer(t *testing.T) {
 		require.NoError(t, errBlock)
 
 		uri.Scheme = "http"
-		req, errBlock := http.NewRequestWithContext(ctx, http.MethodGet, uri.JoinPath(link).String(), http.NoBody)
+		req, errBlock := http.NewRequestWithContext(
+			ctx,
+			http.MethodGet,
+			uri.JoinPath(link).String(),
+			http.NoBody,
+		)
 		require.NoError(t, errBlock)
 
 		resp, errBlock := http.DefaultClient.Do(req)
