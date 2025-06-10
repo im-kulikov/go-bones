@@ -95,7 +95,7 @@ func TestLoggerSecrets(secrets ...string) TestLoggerOption {
 // Returns:
 //   - A pointer to a Logger preconfigured for use in tests.
 func ForTests(options ...TestLoggerOption) *Logger {
-	writer := &testLogWriter{Writer: io.Discard, secrets: []string{slog.TimeKey}}
+	writer := &testLogWriter{Writer: io.Discard, secrets: []string{slog.TimeKey, "Time"}}
 	for _, option := range options {
 		option(writer)
 	}
