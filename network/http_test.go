@@ -241,6 +241,8 @@ func Test_shouldFailOnListener(t *testing.T) {
 		<-done
 		defer func() { <-wait }()
 
+		time.Sleep(100 * time.Millisecond) // wait for server up
+
 		uri := url.URL{Scheme: "http", Host: address}
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri.String(), nil)
 		require.NoError(t, err)
