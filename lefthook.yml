@@ -3,10 +3,12 @@
 pre-commit:
   parallel: true
   jobs:
-    - name: lint & test
+    - name: deps & lint & test
       glob: "*.go"
       group:
         jobs:
+          - run: go mod tidy
+
           - run: make lint
             stage_fixed: true
 
