@@ -95,7 +95,7 @@ func Test_Logger(t *testing.T) {
 		Uint64("Uint64", math.MaxUint64),
 		Float64("Float64", math.MaxFloat64),
 		Bool("Bool", true),
-		Time("Time", time.Unix(100, 0)),
+		Time("Time", time.Unix(100, 0).In(time.FixedZone("Moscow", 3*60*60))),
 		Duration("Duration", time.Second),
 		Any("Any", "val"),
 	}...).Info("message with multi attributes")
