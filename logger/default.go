@@ -9,6 +9,7 @@ import (
 )
 
 // defaultLogger is a globally accessible logger instance that can be shared across the application.
+// nolint:gochecknoglobals
 var defaultLogger atomic.Pointer[Logger]
 
 // Init initializes the default logger with the given configuration, handler,

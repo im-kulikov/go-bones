@@ -19,7 +19,7 @@ type workers struct {
 }
 
 func newWorkers(l *logger.Logger, shutdown ...func(context.Context)) *workers {
-	var launchers []*launcher
+	launchers := make([]*launcher, 10)
 
 	for i := range 10 {
 		num := fmt.Sprintf("worker_%02d", i)

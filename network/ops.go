@@ -19,7 +19,7 @@ import (
 // opsCollector implements prometheus.Collector interface for collecting Go runtime metrics.
 // It gathers metrics from the runtime/metrics package and exposes them in Prometheus format.
 type opsCollector struct {
-    desc *prometheus.Desc
+	desc *prometheus.Desc
 }
 
 const (

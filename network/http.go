@@ -86,7 +86,12 @@ func HTTPOptions(opts []HTTPOption) HTTPOption {
 // NewHTTPServer creates a new HTTP service with the specified configuration.
 // It sets up the server with the provided logger and request handler,
 // and allows additional customization through options.
-func NewHTTPServer(cfg config.HTTPConfig, log *logger.Logger, handler http.Handler, opts ...HTTPOption) (service.Service, error) {
+func NewHTTPServer(
+	cfg config.HTTPConfig,
+	log *logger.Logger,
+	handler http.Handler,
+	opts ...HTTPOption,
+) (service.Service, error) {
 	options, err := prepareHTTPServer(cfg, log, handler, opts...)
 	if err != nil {
 		return nil, err

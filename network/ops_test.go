@@ -80,7 +80,6 @@ func Test_opsServer(t *testing.T) {
 		require.NoError(t, errBlock)
 		require.NoError(t, resp.Body.Close())
 		require.Equal(t, http.StatusOK, resp.StatusCode)
-
 	}
 
 	cancel()
