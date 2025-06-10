@@ -44,7 +44,7 @@ jobs:
     name: Build
     runs-on: ubuntu-latest
     needs: lint
-    strategy: { matrix: { go: [ '1.19.x', '1.20.x' ] } }
+    strategy: { matrix: { go: [ '1.24.x' ] } }
     steps:
       - name: Setup go
         uses: actions/setup-go@v5
