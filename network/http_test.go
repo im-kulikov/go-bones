@@ -40,7 +40,7 @@ func Test_NewHTTPServer(t *testing.T) {
 
 	require.ErrorIs(
 		t,
-		bones.OnlyError(NewHTTPServer(cfg, log, http.NotFoundHandler())),
+		bones.ExtractError(NewHTTPServer(cfg, log, http.NotFoundHandler())),
 		config.ErrTLSEmptyKeyPair,
 	)
 }
@@ -248,7 +248,7 @@ func Test_shouldFailOnListener(t *testing.T) {
 		cli := new(http.Client)
 		require.ErrorIs(
 			t,
-			bones.OnlyError(cli.Do(req)), // nolint:bodyclose
+			bones.ExtractError(cli.Do(req)), // nolint:bodyclose
 			context.DeadlineExceeded,
 		)
 	})

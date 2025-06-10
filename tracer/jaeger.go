@@ -9,9 +9,14 @@ type jaegerSettings struct {
 	ClientType string `env:"OTLP_CLIENT_TYPE"`
 }
 
+var (
+	_ = newJaegerExporter                   // TODO fix after refactoring
+	_ = new(jaegerSettings).exporterOptions // TODO fix after refactoring
+)
+
 func (j jaegerSettings) exporterOptions() {}
 
-func newJaegerExporter(cfg settings) {
+func newJaegerExporter(_ settings) {
 	var test jaegerSettings
 	resource.NewSchemaless(semconv.ServiceNameKey.String("otlp"))
 

@@ -14,5 +14,5 @@ func shouldCatchAnError() (int, error) {
 
 func TestOnlyError(t *testing.T) {
 	require.NotEmpty(t, ErrTest.Error())
-	require.ErrorIs(t, OnlyError(shouldCatchAnError()), ErrTest)
+	require.ErrorIs(t, ExtractError(shouldCatchAnError()), ErrTest)
 }

@@ -43,5 +43,7 @@ func NewGRPCServer(handler http.Handler, opts ...GRPCOption) service.Service {
 		register(settings.server)
 	}
 
+	_ = settings.options // TODO fix after refactoring
+
 	panic("implement me")
 }
