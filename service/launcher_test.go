@@ -45,7 +45,7 @@ func newWorkers(l *logger.Logger, shutdown ...func(context.Context)) *workers {
 			}
 		}, shutdown...)
 
-		launchers = append(launchers, wrk.(*launcher))
+		launchers[i] = wrk.(*launcher)
 	}
 
 	return &workers{launchers: launchers}
