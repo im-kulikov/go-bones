@@ -1,0 +1,13 @@
+# lefthook.yml
+
+pre-commit:
+  parallel: true
+  jobs:
+    - name: lint & test
+      glob: "*.go"
+      group:
+        jobs:
+          - run: make lint
+            stage_fixed: true
+
+          - run: make test
