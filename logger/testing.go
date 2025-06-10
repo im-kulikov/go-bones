@@ -20,7 +20,10 @@ type testLogWriter struct {
 }
 
 // tbWriter wraps testing.TB to allow writing log data directly to test logs.
-type tbWriter struct{ testing.TB }
+type tbWriter struct {
+	testing.TB
+	sync.Mutex
+}
 
 // TestLoggerOption defines a functional option for configuring testing log behavior.
 type TestLoggerOption func(*testLogWriter)
@@ -28,8 +31,13 @@ type TestLoggerOption func(*testLogWriter)
 // Write writes log data to the provided testing.TB, trimming trailing whitespace.
 //
 // This method satisfies the io.Writer interface.
-func (t tbWriter) Write(data []byte) (int, error) {
-	t.Log(string(bytes.TrimSpace(data)))
+func (t *tbWriter) Write(data []byte) (int, error) {
+	t.Lock()
+	defer t.Unlock()
+
+	if !t.Failed() {
+		t.Log(string(bytes.TrimSpace(data)))
+	}
 
 	return len(data), nil
 }
@@ -63,7 +71,7 @@ func TestLoggerWriter(out io.Writer) TestLoggerOption {
 // Returns:
 //   - A TestLoggerOption that appends the testing.TB output to the log output.
 func TestLoggerWriteToTB(t testing.TB) TestLoggerOption {
-	return func(l *testLogWriter) { l.Writer = io.MultiWriter(l.Writer, tbWriter{TB: t}) }
+	return func(l *testLogWriter) { l.Writer = io.MultiWriter(l.Writer, &tbWriter{TB: t}) }
 }
 
 // TestLoggerSecrets allows the test logger to redact specified secret fields.

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/im-kulikov/gonfig"
 	"github.com/stretchr/testify/assert"
@@ -63,7 +64,9 @@ func Test_opsServer(t *testing.T) {
 		cfg.ProfilePath,
 	}
 
-	for _, link := range links {
+	time.Sleep(time.Millisecond * 100) // wait for server up
+
+	for i, link := range links {
 		uri, errBlock := url.Parse("//" + cfg.Address)
 		require.NoError(t, errBlock)
 
@@ -75,6 +78,8 @@ func Test_opsServer(t *testing.T) {
 			http.NoBody,
 		)
 		require.NoError(t, errBlock)
+
+		t.Logf("Request #%d: %s", i, link)
 
 		resp, errBlock := http.DefaultClient.Do(req)
 		require.NoError(t, errBlock)
