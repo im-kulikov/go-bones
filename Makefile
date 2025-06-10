@@ -34,12 +34,12 @@ deps: ## Ensure dependencies
 .PHONY: lint
 lint: ## Run Golang linters aggregator
 	$(info $(M) running linters...)
-	@$(GOBIN)/golangci-lint run -v --timeout 5m0s ./...
+	@golangci-lint run -v --timeout 5m0s ./...
 
 .PHONY: install-tools
 install-tools: $(GOBIN) ## Install tools needed for development
 	$(info $(M) install tools needed for development...)
-	@GOBIN=$(GOBIN) $(GO) install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	@GOBIN=$(GOBIN) $(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
 
 .PHONY: test
 test: MIN_COVERAGE = 70
