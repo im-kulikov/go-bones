@@ -13,6 +13,9 @@ import (
 	"github.com/im-kulikov/go-bones/service"
 )
 
+// ListenOpener defines an interface for creating network listeners.
+// Implementations should handle the creation of network listeners with the specified
+// context, address, and network protocol.
 type ListenOpener interface {
 	Listen(ctx context.Context, address, network string) (net.Listener, error)
 }
@@ -27,10 +30,13 @@ type httpOptions struct {
 }
 
 type (
-	// HTTPOption for httpService.
+
+	// HTTPOption defines a function type for configuring HTTP server options.
+	// It accepts and modifies httpOptions struct.
 	HTTPOption func(*httpOptions)
 
-	// HTTPServerOption for http.Server.
+	// HTTPServerOption defines a function type for configuring http.Server instances.
+	// It allows direct modification of the standard http.Server settings.
 	HTTPServerOption func(*http.Server)
 )
 
@@ -41,22 +47,24 @@ const (
 	httpServerStarting  = "http server starting"
 	httpsServerStarting = "https server starting"
 
-	// ErrHTTPCheckListener fires when could not use provided address.
+	// ErrHTTPCheckListener indicates a failure during the initialization of the HTTP listener.
 	ErrHTTPCheckListener bones.Error = "http check listener"
 
-	// ErrHTTPCloseListener fires when could not close test listener.
+	// ErrHTTPCloseListener indicates a failure when attempting to close the HTTP listener.
 	ErrHTTPCloseListener bones.Error = "http close listener"
 
-	// ErrHTTPShutdownServer fires when could not close http.Server.
+	// ErrHTTPShutdownServer indicates a failure during the shutdown process of the HTTP server.
 	ErrHTTPShutdownServer bones.Error = "http shutdown server"
 )
 
-// HTTPServiceName allows to set httpService name.
+// HTTPServiceName sets a custom name for the HTTP service.
+// This name is used for logging and identification purposes.
 func HTTPServiceName(name string) HTTPOption {
 	return func(settings *httpOptions) { settings.name = name }
 }
 
-// HTTPServerOptions allows to set HTTPServerOptions to http.Server.
+// HTTPServerOptions applies a collection of server-specific configurations.
+// It allows chaining multiple server options for the internal http.Server instance.
 func HTTPServerOptions(opts ...HTTPServerOption) HTTPOption {
 	return func(s *httpOptions) {
 		for _, opt := range opts {
@@ -65,7 +73,8 @@ func HTTPServerOptions(opts ...HTTPServerOption) HTTPOption {
 	}
 }
 
-// HTTPOptions allows to set multiple HTTPOption's at once.
+// HTTPOptions combines multiple HTTP options into a single configuration function.
+// It sequentially applies each option in the provided slice.
 func HTTPOptions(opts []HTTPOption) HTTPOption {
 	return func(settings *httpOptions) {
 		for _, opt := range opts {
@@ -74,12 +83,10 @@ func HTTPOptions(opts []HTTPOption) HTTPOption {
 	}
 }
 
-func NewHTTPServer(
-	cfg config.HTTPConfig,
-	log *logger.Logger,
-	handler http.Handler,
-	opts ...HTTPOption,
-) (service.Service, error) {
+// NewHTTPServer creates a new HTTP service with the specified configuration.
+// It sets up the server with the provided logger and request handler,
+// and allows additional customization through options.
+func NewHTTPServer(cfg config.HTTPConfig, log *logger.Logger, handler http.Handler, opts ...HTTPOption) (service.Service, error) {
 	options, err := prepareHTTPServer(cfg, log, handler, opts...)
 	if err != nil {
 		return nil, err
@@ -92,6 +99,8 @@ func NewHTTPServer(
 	}), nil
 }
 
+// The newHTTPServer initializes and returns an http.Server configured with the provided HTTPConfig.
+// It prepares TLS configuration if enabled and returns an error on failure excluding a disabled TLS scenario.
 func newHTTPServer(c config.HTTPConfig) (*http.Server, error) {
 	var err error
 	base := c.Base()
@@ -112,6 +121,8 @@ func newHTTPServer(c config.HTTPConfig) (*http.Server, error) {
 	}, nil
 }
 
+// prepareHTTPServer configures and prepares an HTTP server with provided configuration, logger, handler, and options.
+// It returns the configured httpOptions or an error on failure.
 func prepareHTTPServer(
 	cfg config.HTTPConfig,
 	log *logger.Logger,
@@ -139,6 +150,7 @@ func prepareHTTPServer(
 	return options, nil
 }
 
+// serve starts the HTTP server, selecting between plain HTTP or HTTPS based on the TLS configuration.
 func (h *httpOptions) serve() error {
 	if h.base.TLSConfig == nil {
 		h.Info(httpServerStarting,
@@ -158,6 +170,8 @@ func (h *httpOptions) serve() error {
 	)
 }
 
+// The listen handles the initialization and operation of the HTTP server, including listening, serving, and shutdown.
+// Returns an error if the listener setup, server operation, or shutdown process encounters an issue.
 func (h *httpOptions) listen(top context.Context) error {
 	if lis, err := h.open.Listen(top, defaultHTTPNetwork, h.Addr); err != nil {
 		return errors.Join(ErrHTTPCheckListener, err)

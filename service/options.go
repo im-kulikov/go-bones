@@ -7,11 +7,16 @@ import (
 	"github.com/im-kulikov/go-bones/logger"
 )
 
-// Option represents a functional option for configuring the service settings.
+// Option provides a type interface with a method to create options for managing goroutines or services.
+// An option can be created by calling WithService or WithShutdownTimeout,
+// which add options to manage their respective resources.
+// Options are used to conditionally run, stop, or modify the lifecycle of goroutines and services.
 type Option func(*settings)
 
-// WithShutdownTimeout sets the timeout for graceful shutdown.
-// If the provided value is zero, it is ignored.
+// WithShutdownTimeout adds an option to manage the shutdown of services.
+// When called with a time.Duration, it shuts down any service specified.
+// If no argument is provided, returns an Option that can be used with WithService.
+// This function provides a way to conditionally manage service shutdowns cleanly via options.
 func WithShutdownTimeout(v time.Duration) Option {
 	return func(g *settings) {
 		if v == 0 {

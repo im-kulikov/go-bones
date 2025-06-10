@@ -1,3 +1,4 @@
+// Package network provides network-related functionality and services.
 package network
 
 import (
@@ -15,8 +16,10 @@ import (
 	"github.com/im-kulikov/go-bones/service"
 )
 
+// opsCollector implements prometheus.Collector interface for collecting Go runtime metrics.
+// It gathers metrics from the runtime/metrics package and exposes them in Prometheus format.
 type opsCollector struct {
-	desc *prometheus.Desc
+    desc *prometheus.Desc
 }
 
 const (
@@ -26,18 +29,27 @@ const (
 	opsCollectorDescription = "Raw golang runtime/metrics value"
 )
 
+// newOpsCollector creates and initializes a new opsCollector instance.
+// It sets up a Prometheus metric descriptor with the name "gm_runtime" that will contain
+// raw values from Go runtime metrics.
 func newOpsCollector() *opsCollector {
 	return &opsCollector{
 		desc: prometheus.NewDesc(opsCollectorName, opsCollectorDescription, []string{"name"}, nil),
 	}
 }
 
-// Describe used to implement prometheus.Collector.
+// Describe implements prometheus.Collector interface.
+// It sends the collector's metric descriptor to the provided channel.
+// This method is called by Prometheus when the collector is registered.
 func (o *opsCollector) Describe(out chan<- *prometheus.Desc) {
 	out <- o.desc
 }
 
-// Collect used to implement prometheus.Collector.
+// Collect implements prometheus.Collector interface.
+// It gathers all available runtime metrics that are either uint64 or float64,
+// reads their current values, and sends them as Prometheus metrics through
+// the provided channel. Each metric is labeled with its original name from
+// the runtime/metrics package.
 func (o *opsCollector) Collect(out chan<- prometheus.Metric) {
 	desc := metrics.All()
 	list := make([]metrics.Sample, 0, len(desc))
@@ -68,6 +80,17 @@ func (o *opsCollector) Collect(out chan<- prometheus.Metric) {
 	}
 }
 
+// NewOPSServer creates a new operations server that provides monitoring and debugging endpoints.
+// It sets up the following handlers:
+//   - Prometheus metrics endpoint
+//   - Expvar variables endpoint
+//   - pprof debugging endpoints (index, cmdline, profile, symbol, and trace)
+//
+// Parameters:
+//   - cfg: Configuration for the operations server
+//   - log: Logger instance for server operations
+//
+// Returns a configured HTTP server as a service.Service interface and any error encountered during setup.
 func NewOPSServer(cfg config.Ops, log *logger.Logger) (service.Service, error) {
 	mux := http.NewServeMux()
 

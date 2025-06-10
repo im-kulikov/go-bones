@@ -9,6 +9,7 @@ import (
 
 const pingPongServiceName = "ping-pong"
 
+// newPingPong returns an instance of Service that wraps the launcher function named "ping-pong" with the logger.
 func newPingPong(l *logger.Logger, timeout time.Duration) Service {
 	return NewLauncher(pingPongServiceName, func(ctx context.Context) error {
 		log := logger.Named(l, pingPongServiceName)
