@@ -32,7 +32,7 @@ jobs:
 
       - name: golangci-lint
         with: { version: latest }
-        uses: golangci/golangci-lint-action@v3
+        uses: golangci/golangci-lint-action@v8
 
       - name: dump dependencies (for nancy)
         run: go list -json -m all > go.list
