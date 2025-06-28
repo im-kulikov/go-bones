@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -46,6 +47,8 @@ func Test_NewHTTPServer(t *testing.T) {
 }
 
 func generateTLSKeyPair(t *testing.T) (string, string) {
+	t.Helper()
+
 	private, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
 
@@ -95,17 +98,27 @@ func Test_NewHTTPServer_With_TLS(t *testing.T) {
 	var cfg customHTTPSettings
 	cfg.Address = lis.Addr().String()
 	cfg.TLSConfig = new(config.TLS)
+	cfg.ShutdownTimeout = time.Nanosecond
 
 	require.NoError(t, gonfig.SetDefaults(cfg.TLSConfig))
 	cfg.TLSConfig.Enabled = true
 	cfg.TLSConfig.KeyFile, cfg.TLSConfig.CertFile = generateTLSKeyPair(t)
 
-	srv, err := NewHTTPServer(cfg, log, http.NotFoundHandler())
+	var i atomic.Int64
+	srv, err := NewHTTPServer(cfg, log,
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			time.Sleep(time.Second * time.Duration(i.Load()))
+
+			http.Error(w, "test", http.StatusNotFound)
+		}), HTTPOptions([]HTTPOption{
+			HTTPServerOptions(func(server *http.Server) {
+				server.WriteTimeout = 10 * time.Second
+			}),
+		}))
 	require.NoError(t, err)
 
 	done := make(chan struct{})
 	wait := make(chan struct{})
-
 	go func() {
 		close(done)
 		assert.ErrorIs(t, srv.Start(ctx), service.ErrCancelCalled)
@@ -119,19 +132,39 @@ func Test_NewHTTPServer_With_TLS(t *testing.T) {
 	uri, err := url.Parse("https://" + cfg.Address)
 	require.NoError(t, err)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri.String(), nil)
-	require.NoError(t, err)
+	{
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri.String(), nil)
+		require.NoError(t, err)
 
-	cli := new(http.Client)
-	cli.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+		cli := new(http.Client)
+		cli.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
 
-	res, err := cli.Do(req)
-	require.NoError(t, err)
+		res, err := cli.Do(req)
+		require.NoError(t, err)
 
-	require.Equal(t, http.StatusNotFound, res.StatusCode)
-	require.NoError(t, res.Body.Close())
+		require.Equal(t, http.StatusNotFound, res.StatusCode)
+		require.NoError(t, res.Body.Close())
+	}
+
+	out := make(chan struct{})
+	go func() {
+		i.Store(10)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri.String(), nil)
+		assert.NoError(t, err)
+
+		cli := new(http.Client)
+		cli.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+
+		_, errDo := cli.Do(req) // nolint:bodyclose
+		assert.ErrorIs(t, errDo, service.ErrCancelCalled)
+
+		close(out)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
 
 	cancel()
+	<-out
 }
 
 type fakeOpener struct {
@@ -232,11 +265,11 @@ func Test_shouldFailOnListener(t *testing.T) {
 
 		done := make(chan struct{})
 		wait := make(chan struct{})
-		go func() {
+		context.AfterFunc(ctx, func() {
 			close(done)
 			assert.ErrorIs(t, svc.Start(ctx), context.DeadlineExceeded)
 			close(wait)
-		}()
+		})
 
 		<-done
 		defer func() { <-wait }()

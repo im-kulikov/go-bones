@@ -67,10 +67,10 @@ func WithTOML() Option {
 }
 
 func Load(v any, options ...Option) error {
-	cfg := &settings{options: []gonfig.LoaderOption{}}
+	var cfg settings
 
 	for _, option := range options {
-		option(cfg)
+		option(&cfg)
 	}
 
 	if cfg.kind == "" { // enable yaml by default

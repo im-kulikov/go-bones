@@ -1,17 +1,139 @@
 package config
 
 import (
+	"os"
+	"strings"
+	"sync"
 	"testing"
+
+	"github.com/im-kulikov/gonfig"
+	"github.com/stretchr/testify/require"
 )
 
 type TestConfig struct {
-	Base
+	Base `yaml:",inline" toml:",inline" json:",inline" env:",squash"`
+
+	Config string `flag:"config,config:true"`
 }
 
-func inner(config Base) {}
+type testCase struct {
+	name string
+	body string
+	opts Option
+}
 
-func Test_testing(t *testing.T) {
-	var config TestConfig
+type testParser int
 
-	inner(config.Base)
+type testWriter struct {
+	*testing.T
+	sync.Mutex
+}
+
+const (
+	exampleConfigYAML = `---
+logger:
+  open-tracing: true
+  secrets: ["test"]
+`
+	exampleFailConfigYAML = `---
+logger;
+  open-tracing: true
+  secrets: ["test"]
+`
+
+	exampleConfigTOML = `
+[logger]
+open-tracing = true
+secrets = [ "test" ]
+`
+	exampleConfigJSON = `{
+	"logger": {
+		"open-tracing": true,
+		"secrets": ["test"]
+	}
+}`
+)
+
+func (t *testWriter) Write(p []byte) (n int, err error) {
+	t.Lock()
+	defer t.Unlock()
+	t.Logf("%s", p)
+
+	return len(p), nil
+}
+
+func (t *testParser) Load(any) error { return nil }
+
+func (t *testParser) Type() gonfig.ParserType { return "test" }
+
+func fetchError(args ...any) error {
+	if len(args) == 0 {
+		return nil
+	}
+
+	if err, ok := args[len(args)-1].(error); ok {
+		return err
+	}
+
+	return nil
+}
+
+func validateConfig(t *testing.T, c testCase, handle func(cfg TestConfig, err error)) {
+	tmp, err := os.CreateTemp(t.TempDir(), "*.config")
+	require.NoError(t, err)
+	require.NoError(t, fetchError(strings.NewReader(c.body).WriteTo(tmp)))
+	require.NoError(t, tmp.Close())
+
+	customParser := testParser(1)
+
+	var cfg TestConfig
+	err = Load(&cfg,
+		c.opts,
+		WithName("name"),
+		WithVersion("test"),
+		WithParsers(&customParser),
+		WithParserInt(func(c gonfig.Config) (gonfig.Parser, error) {
+			var p testParser
+
+			return &p, nil
+		}),
+		WithLoaderOptions(gonfig.WithCustomOutput(&testWriter{T: t})),
+		WithCustomizeLoaderConfig(func(c *gonfig.Config) {
+			c.Args = append(c.Args, "--config", tmp.Name())
+		}))
+	handle(cfg, err)
+}
+
+func Test_config(t *testing.T) {
+	cases := []testCase{
+		{name: "json", body: exampleConfigJSON, opts: WithJSON()},
+		{name: "yaml", body: exampleConfigYAML, opts: WithYAML()},
+		{name: "default", body: exampleConfigYAML, opts: func(*settings) {}},
+		{name: "toml", body: exampleConfigTOML, opts: WithTOML()},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			validateConfig(t, c, func(cfg TestConfig, err error) {
+				require.NoError(t, err)
+
+				require.Equal(t, "name", cfg.OpsServer.AppName())
+				require.Equal(t, "test", cfg.OpsServer.AppVersion())
+
+				require.Equal(t, "name", cfg.Logger.name)
+				require.Equal(t, "test", cfg.Logger.version)
+
+				require.True(t, cfg.Logger.OpenTracingEnabled)
+				require.Equal(t, []string{"test"}, cfg.Logger.Secrets)
+			})
+		})
+	}
+
+	t.Run("should fail", func(t *testing.T) {
+		validateConfig(t,
+			testCase{
+				body: exampleFailConfigYAML,
+				opts: func(*settings) {},
+			}, func(cfg TestConfig, err error) { require.ErrorIs(t, err, gonfig.ErrCantParse) })
+	})
 }
