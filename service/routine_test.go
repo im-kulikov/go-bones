@@ -67,7 +67,7 @@ func TestRun_Success(t *testing.T) {
 
 func TestRunContext_Success(t *testing.T) {
 	log := logger.ForTests()
-	top, cancel := context.WithCancel(context.Background())
+	top, cancel := context.WithTimeout(t.Context(), time.Millisecond*100)
 	defer cancel()
 
 	mockSvc := new(mockService)
@@ -96,8 +96,6 @@ func TestRunContext_Success(t *testing.T) {
 
 func TestRunContext_Failure(t *testing.T) {
 	log := logger.ForTests()
-	top, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	mockSvc := new(mockService)
 	mockSvc.name = "testService"
@@ -113,7 +111,7 @@ func TestRunContext_Failure(t *testing.T) {
 
 	errChan := make(chan error, 1)
 	go func() {
-		errChan <- RunContext(top, log, options...)
+		errChan <- RunContext(t.Context(), log, options...)
 	}()
 
 	assert.Error(t, <-errChan)
@@ -122,7 +120,7 @@ func TestRunContext_Failure(t *testing.T) {
 
 func TestShutdownServices(t *testing.T) {
 	log := logger.ForTests()
-	top, cancel := context.WithCancel(context.Background())
+	top, cancel := context.WithTimeout(t.Context(), time.Millisecond*100)
 	defer cancel()
 
 	mockSvc := new(mockService)
@@ -149,10 +147,7 @@ func TestShutdownServices(t *testing.T) {
 }
 
 func TestSignalHandling(t *testing.T) {
-	top, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	ctx, stop := SignalContext(top, syscall.SIGUSR1)
+	ctx, stop := SignalContext(t.Context(), syscall.SIGUSR1)
 	defer stop()
 
 	go func() {

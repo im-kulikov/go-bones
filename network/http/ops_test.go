@@ -1,7 +1,6 @@
-package network
+package http
 
 import (
-	"context"
 	"net"
 	"net/http"
 	"net/url"
@@ -25,7 +24,7 @@ func Test_opsServer(t *testing.T) {
 	var cfg config.Ops
 	require.NoError(t, gonfig.SetDefaults(&cfg))
 
-	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	lis, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	require.NoError(t, lis.Close())
 
@@ -35,7 +34,7 @@ func Test_opsServer(t *testing.T) {
 	ops, err := NewOPSServer(cfg, log)
 	require.NoError(t, err)
 
-	ctx, cancel := service.SignalContext(context.TODO(),
+	ctx, cancel := service.SignalContext(t.Context(),
 		syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	defer cancel()
 
@@ -47,7 +46,7 @@ func Test_opsServer(t *testing.T) {
 		defer wait.Done()
 
 		<-ctx.Done()
-		ops.Stop(context.TODO())
+		ops.Stop(t.Context())
 	}()
 
 	go func() {

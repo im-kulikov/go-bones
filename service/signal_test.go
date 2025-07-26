@@ -11,10 +11,7 @@ import (
 )
 
 func TestSignalContext(t *testing.T) {
-	top, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	ctx, stop := SignalContext(top, syscall.SIGUSR1)
+	ctx, stop := SignalContext(t.Context(), syscall.SIGUSR1)
 	defer stop()
 
 	// Simulate sending a signal
@@ -34,11 +31,8 @@ func TestSignalContext(t *testing.T) {
 }
 
 func TestSignalContext_Cancel(t *testing.T) {
-	top, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	ctx, stop := SignalContext(top, syscall.SIGUSR1)
-	stop()
+	ctx, cancel := SignalContext(t.Context(), syscall.SIGUSR1)
+	cancel()
 
 	select {
 	case <-ctx.Done():
@@ -49,11 +43,11 @@ func TestSignalContext_Cancel(t *testing.T) {
 }
 
 func TestSignalContext_TopContextCancel(t *testing.T) {
-	top, cancel := context.WithCancel(context.Background())
-	ctx, stop := SignalContext(top, syscall.SIGUSR1)
-	defer stop()
+	top, stop := context.WithCancel(t.Context())
+	stop()
 
-	cancel()
+	ctx, cancel := SignalContext(top, syscall.SIGUSR1)
+	defer cancel()
 
 	select {
 	case <-ctx.Done():

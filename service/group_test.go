@@ -62,10 +62,10 @@ func TestGroup(t *testing.T) {
 			require.Equal(t, tt.name, svc.Name())
 			require.Len(t, svc, tt.nums)
 			require.Panics(t, func() {
-				assert.NoError(t, svc.Start(context.TODO()))
+				assert.NoError(t, svc.Start(t.Context()))
 			}, "should do nothing")
 			require.Panics(t, func() {
-				svc.Stop(context.TODO())
+				svc.Stop(t.Context())
 			}, "should do nothing")
 		})
 	}

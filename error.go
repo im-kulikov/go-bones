@@ -16,17 +16,17 @@ func (e Error) Error() string { return string(e) }
 //
 // Example:
 //
-//	 require.ErrorIs(t, ExtractError(shouldCatchAnError()), ErrTest)
+//	require.ErrorIs(t, ExtractError(shouldCatchAnError()), ErrTest)
 //
-//		// example func SomeFunction() (float, error)
-//		if err := ExtractError(SomeFunction()); err != nil {
-//		    log.Println("error occurred:", err)
-//		}
+//	// example func SomeFunction() (float, error)
+//	if err := ExtractError(SomeFunction()); err != nil {
+//	    log.Println("error occurred:", err)
+//	}
 //
-//		// example func AnotherFunction() (int, string, error)
-//		if err := ExtractError(AnotherFunction()); err != nil {
-//		    log.Println("error occurred:", err)
-//		}
+//	// example func AnotherFunction() (int, string, error)
+//	if err := ExtractError(AnotherFunction()); err != nil {
+//	    log.Println("error occurred:", err)
+//	}
 func ExtractError(args ...any) error {
 	if len(args) == 0 {
 		return nil

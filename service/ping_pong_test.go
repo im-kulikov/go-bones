@@ -13,7 +13,7 @@ import (
 )
 
 func TestPingPong(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*100)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Millisecond*100)
 	defer cancel()
 
 	var wg sync.WaitGroup

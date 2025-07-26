@@ -65,13 +65,13 @@ func (w *workers) Options() []Option {
 func Test_Workers(t *testing.T) {
 	t.Run("should fail on empty launcher", func(t *testing.T) {
 		require.ErrorIs(t,
-			NewLauncher("simple", nil).Start(context.TODO()),
+			NewLauncher("simple", nil).Start(t.Context()),
 			ErrEmptyLauncher)
 	})
 
 	t.Run("should not run launcher on cancelled context", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.TODO())
-		cancel()
+		ctx, cancel := context.WithTimeout(t.Context(), time.Nanosecond)
+		defer cancel()
 
 		log := logger.ForTests()
 		wrk := NewLauncher("simple", func(top context.Context) error {
@@ -93,7 +93,7 @@ func Test_Workers(t *testing.T) {
 		})
 
 		{ // when we stop without start, we should wait
-			ctx, cancel := context.WithTimeout(context.TODO(), time.Millisecond)
+			ctx, cancel := context.WithTimeout(t.Context(), time.Millisecond)
 			defer cancel()
 
 			now := time.Now()
@@ -106,7 +106,7 @@ func Test_Workers(t *testing.T) {
 		{ // when start and stop
 			now := time.Now()
 
-			ctx, cancel := context.WithTimeout(context.TODO(), time.Millisecond*10)
+			ctx, cancel := context.WithTimeout(t.Context(), time.Millisecond*10)
 			defer cancel()
 
 			go func() { assert.NoError(t, wrk.Start(ctx)) }()
@@ -129,7 +129,7 @@ func Test_Workers(t *testing.T) {
 
 		log.Info("test")
 
-		ctx, cancel := context.WithTimeout(context.TODO(), time.Millisecond*200)
+		ctx, cancel := context.WithTimeout(t.Context(), time.Millisecond*200)
 		defer cancel()
 
 		var wg sync.WaitGroup
@@ -160,7 +160,7 @@ func Test_onShutdown(t *testing.T) {
 
 	log := logger.ForTests()
 	wrk := newWorkers(log, fun)
-	ctx, cancel := context.WithTimeout(context.TODO(), time.Millisecond*100)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Millisecond*100)
 	defer cancel()
 
 	options := wrk.Options()

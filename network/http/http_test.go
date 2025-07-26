@@ -1,4 +1,4 @@
-package network
+package http
 
 import (
 	"context"
@@ -41,7 +41,7 @@ func Test_NewHTTPServer(t *testing.T) {
 
 	require.ErrorIs(
 		t,
-		bones.ExtractError(NewHTTPServer(cfg, log, http.NotFoundHandler())),
+		bones.ExtractError(NewServer(cfg, log)),
 		config.ErrTLSEmptyKeyPair,
 	)
 }
@@ -86,7 +86,7 @@ func generateTLSKeyPair(t *testing.T) (string, string) {
 }
 
 func Test_NewHTTPServer_With_TLS(t *testing.T) {
-	ctx, cancel := service.SignalContext(context.Background(), syscall.SIGTERM)
+	ctx, cancel := service.SignalContext(t.Context(), syscall.SIGTERM)
 	defer cancel()
 
 	lis, err := new(net.ListenConfig).Listen(ctx, "tcp", "127.0.0.1:0")
@@ -105,16 +105,15 @@ func Test_NewHTTPServer_With_TLS(t *testing.T) {
 	cfg.TLSConfig.KeyFile, cfg.TLSConfig.CertFile = generateTLSKeyPair(t)
 
 	var i atomic.Int64
-	srv, err := NewHTTPServer(cfg, log,
-		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			time.Sleep(time.Second * time.Duration(i.Load()))
+	srv, err := NewServer(cfg, log, Options(
+		ServerOptions(func(server *http.Server) {
+			server.WriteTimeout = 10 * time.Second
+			server.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				time.Sleep(time.Second * time.Duration(i.Load()))
 
-			http.Error(w, "test", http.StatusNotFound)
-		}), HTTPOptions([]HTTPOption{
-			HTTPServerOptions(func(server *http.Server) {
-				server.WriteTimeout = 10 * time.Second
-			}),
-		}))
+				http.Error(w, "test", http.StatusNotFound)
+			})
+		})))
 	require.NoError(t, err)
 
 	done := make(chan struct{})
@@ -189,8 +188,8 @@ func (f *fakeOpener) Listen(context.Context, string, string) (net.Listener, erro
 
 func (f *fakeOpener) Close() error { return f.onClose }
 
-func withFakeListener(errs ...error) HTTPOption {
-	return func(o *httpOptions) {
+func withFakeListener(errs ...error) Option {
+	return func(o *serverOptions) {
 		var onListen error
 		if len(errs) > 0 {
 			onListen = errs[0]
@@ -206,7 +205,7 @@ func withFakeListener(errs ...error) HTTPOption {
 }
 
 func Test_shouldFailOnListener(t *testing.T) {
-	top, stop := service.SignalContext(context.Background(), syscall.SIGTERM)
+	top, stop := service.SignalContext(t.Context(), syscall.SIGTERM)
 	defer stop()
 
 	var address string
@@ -227,40 +226,39 @@ func Test_shouldFailOnListener(t *testing.T) {
 	log := logger.ForTests(logger.TestLoggerWriteToTB(t))
 
 	t.Run("should fail on listen", func(t *testing.T) { // should fail on listen
-		svc, err := NewHTTPServer(
+		svc, err := NewServer(
 			cfg,
 			log,
-			http.NotFoundHandler(),
 			withFakeListener(errOnListen),
 		)
 		require.NoError(t, err)
 
-		require.ErrorIs(t, svc.Start(context.TODO()), errOnListen)
+		require.ErrorIs(t, svc.Start(t.Context()), errOnListen)
 	})
 
 	t.Run("should fail on close listener", func(t *testing.T) { // should fail on close listener
-		svc, err := NewHTTPServer(
+		svc, err := NewServer(
 			cfg,
 			log,
-			http.NotFoundHandler(),
 			withFakeListener(nil, errOnClose),
 		)
 		require.NoError(t, err)
 
-		require.ErrorIs(t, svc.Start(context.TODO()), errOnClose)
+		require.ErrorIs(t, svc.Start(t.Context()), errOnClose)
 	})
 
 	t.Run("should fail on shutdown", func(t *testing.T) { // should fail on shutdown
 		ctx, cancel := context.WithTimeout(top, time.Millisecond*100)
 		defer cancel()
 
-		svc, err := NewHTTPServer(
+		svc, err := NewServer(
 			cfg,
 			log,
-			http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-				time.Sleep(time.Second)
-			}),
-		)
+			ServerOptions(func(srv *http.Server) {
+				srv.Handler = http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+					time.Sleep(time.Second)
+				})
+			}))
 		require.NoError(t, err)
 
 		done := make(chan struct{})

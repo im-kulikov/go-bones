@@ -1,4 +1,4 @@
-package network
+package http
 
 import (
 	"context"
@@ -20,7 +20,7 @@ type ListenOpener interface {
 	Listen(ctx context.Context, address, network string) (net.Listener, error)
 }
 
-type httpOptions struct {
+type serverOptions struct {
 	name string
 	open ListenOpener
 	base config.BaseHTTP
@@ -31,13 +31,13 @@ type httpOptions struct {
 
 type (
 
-	// HTTPOption defines a function type for configuring HTTP server options.
-	// It accepts and modifies httpOptions struct.
-	HTTPOption func(*httpOptions)
+	// Option defines a function type for configuring HTTP server options.
+	// It accepts and modifies the serverOptions struct.
+	Option func(*serverOptions)
 
-	// HTTPServerOption defines a function type for configuring http.Server instances.
+	// ServerOption defines a function type for configuring http.Server instances.
 	// It allows direct modification of the standard http.Server settings.
-	HTTPServerOption func(*http.Server)
+	ServerOption func(*http.Server)
 )
 
 const (
@@ -57,42 +57,41 @@ const (
 	ErrHTTPShutdownServer bones.Error = "http shutdown server"
 )
 
-// HTTPServiceName sets a custom name for the HTTP service.
-// This name is used for logging and identification purposes.
-func HTTPServiceName(name string) HTTPOption {
-	return func(settings *httpOptions) { settings.name = name }
+// ServiceName sets a custom name for the HTTP service.
+// This name is used for logging and identification.
+func ServiceName(name string) Option {
+	return func(settings *serverOptions) { settings.name = name }
 }
 
-// HTTPServerOptions applies a collection of server-specific configurations.
+// ServerOptions applies a collection of server-specific configurations.
 // It allows chaining multiple server options for the internal http.Server instance.
-func HTTPServerOptions(opts ...HTTPServerOption) HTTPOption {
-	return func(s *httpOptions) {
+func ServerOptions(opts ...ServerOption) Option {
+	return func(s *serverOptions) {
 		for _, opt := range opts {
 			opt(s.Server)
 		}
 	}
 }
 
-// HTTPOptions combines multiple HTTP options into a single configuration function.
+// Options combines multiple HTTP options into a single configuration function.
 // It sequentially applies each option in the provided slice.
-func HTTPOptions(opts []HTTPOption) HTTPOption {
-	return func(settings *httpOptions) {
+func Options(opts ...Option) Option {
+	return func(settings *serverOptions) {
 		for _, opt := range opts {
 			opt(settings)
 		}
 	}
 }
 
-// NewHTTPServer creates a new HTTP service with the specified configuration.
-// It sets up the server with the provided logger and request handler,
+// NewServer creates a new HTTP service with the specified configuration.
+// It sets up the server with the provided logger and request handler
 // and allows additional customization through options.
-func NewHTTPServer(
+func NewServer(
 	cfg config.HTTPConfig,
 	log *logger.Logger,
-	handler http.Handler,
-	opts ...HTTPOption,
+	opts ...Option,
 ) (service.Service, error) {
-	options, err := prepareHTTPServer(cfg, log, handler, opts...)
+	options, err := prepareServer(cfg, log, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -104,9 +103,9 @@ func NewHTTPServer(
 	}), nil
 }
 
-// The newHTTPServer initializes and returns an http.Server configured with the provided HTTPConfig.
+// The newServer initializes and returns an http.Server configured with the provided HTTPConfig.
 // It prepares TLS configuration if enabled and returns an error on failure excluding a disabled TLS scenario.
-func newHTTPServer(c config.HTTPConfig) (*http.Server, error) {
+func newServer(c config.HTTPConfig) (*http.Server, error) {
 	var err error
 	base := c.Base()
 
@@ -126,37 +125,36 @@ func newHTTPServer(c config.HTTPConfig) (*http.Server, error) {
 	}, nil
 }
 
-// prepareHTTPServer configures and prepares an HTTP server with provided configuration, logger, handler, and options.
-// It returns the configured httpOptions or an error on failure.
-func prepareHTTPServer(
+// prepareServer configures and prepares an HTTP server with provided configuration, logger, handler, and options.
+// It returns the configured serverOptions or an error on failure.
+func prepareServer(
 	cfg config.HTTPConfig,
 	log *logger.Logger,
-	handler http.Handler,
-	opts ...HTTPOption,
-) (*httpOptions, error) {
-	srv, err := newHTTPServer(cfg)
+	opts ...Option,
+) (*serverOptions, error) {
+	srv, err := newServer(cfg)
 	if err != nil {
 		return nil, err
 	}
 
-	options := &httpOptions{
+	options := &serverOptions{
 		Logger: log,
 		Server: srv,
-		base:   cfg.Base(),
-		open:   new(net.ListenConfig),
-		name:   defaultHTTPServiceName,
+
+		base: cfg.Base(),
+		open: new(net.ListenConfig),
+		name: defaultHTTPServiceName,
 	}
+
 	for _, opt := range opts {
 		opt(options)
 	}
-
-	options.Server.Handler = handler
 
 	return options, nil
 }
 
 // serve starts the HTTP server, selecting between plain HTTP or HTTPS based on the TLS configuration.
-func (h *httpOptions) serve() error {
+func (h *serverOptions) serve() error {
 	if h.base.TLSConfig == nil {
 		h.Info(httpServerStarting,
 			logger.String("service", h.name),
@@ -177,7 +175,7 @@ func (h *httpOptions) serve() error {
 
 // The listen handles the initialization and operation of the HTTP server, including listening, serving, and shutdown.
 // Returns an error if the listener setup, server operation, or shutdown process encounters an issue.
-func (h *httpOptions) listen(top context.Context) error {
+func (h *serverOptions) listen(top context.Context) error {
 	if lis, err := h.open.Listen(top, defaultHTTPNetwork, h.Addr); err != nil {
 		return errors.Join(ErrHTTPCheckListener, err)
 	} else if h.Addr, err = lis.Addr().String(), lis.Close(); err != nil {

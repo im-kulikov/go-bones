@@ -5,8 +5,9 @@ import (
 	"time"
 )
 
+// BaseGRPC represents the base configuration for a gRPC server, including TLS settings and timeouts.
 // nolint:lll
-type BaseHTTP struct {
+type BaseGRPC struct {
 	appSettings
 
 	TLSConfig         *TLS          `toml:"tls"                 yaml:"tls"                 json:"tls"               env:"TLS"`
@@ -18,30 +19,19 @@ type BaseHTTP struct {
 	MaxHeaderBytes    int           `toml:"max_header_bytes"    yaml:"max_header_bytes"    json:"maxHeaderBytes"    env:"MAX_HEADER_BYTES"`
 }
 
-// Ops contains settings for OPS server.
-// nolint:lll
-type Ops struct {
-	BaseHTTP    `       yaml:",inline"       env:",squash"`
-	Address     string `yaml:"address"       env:"ADDRESS"       toml:"address"       json:"address"       default:":8090"`
-	MetricsPath string `yaml:"metrics_path"  env:"METRICS_PATH"  toml:"metrics_path"  json:"metrics_path"  default:"/metrics"`
-	ProfilePath string `yaml:"profile_path"  env:"PROFILE_PATH"  toml:"profile_path"  json:"profile_path"  default:"/debug/pprof"`
-	ExpVarsPath string `yaml:"exp_vars_path" env:"EXP_VARS_PATH" toml:"exp_vars_path" json:"exp_vars_path" default:"/debug/vars"`
-}
-
-// HTTPConfig an interface for http settings.
-type HTTPConfig interface {
+// GRPCConfig is an interface defining configuration options for a gRPC server.
+// Addr returns the address the gRPC server will listen on.
+// Base returns the BaseGRPC configuration struct for detailed settings.
+type GRPCConfig interface {
 	Addr() string
-	Base() BaseHTTP
+	Base() BaseGRPC
 }
 
-// Base settings for http.Server.
-func (c BaseHTTP) Base() BaseHTTP { return c }
+// Base returns the BaseGRPC instance itself, providing a fluent interface style.
+func (c BaseGRPC) Base() BaseGRPC { return c }
 
-// Addr for http.Server.
-func (c Ops) Addr() string { return c.Address }
-
-// PrepareTLSConfig creates tls.Config from settings.
-func (c BaseHTTP) PrepareTLSConfig() (*tls.Config, error) {
+// PrepareTLSConfig generates a TLS configuration or returns an error if TLS is not enabled or misconfigured.
+func (c BaseGRPC) PrepareTLSConfig() (*tls.Config, error) {
 	if c.TLSConfig == nil {
 		return nil, ErrTLSDisabled
 	}

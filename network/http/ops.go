@@ -1,5 +1,5 @@
 // Package network provides network-related functionality and services.
-package network
+package http
 
 import (
 	"expvar"
@@ -108,10 +108,12 @@ func NewOPSServer(cfg config.Ops, log *logger.Logger) (service.Service, error) {
 	mux.HandleFunc(cfg.ProfilePath+"/symbol", pprof.Symbol)
 	mux.HandleFunc(cfg.ProfilePath+"/trace", pprof.Trace)
 
-	return NewHTTPServer(
+	return NewServer(
 		cfg,
 		log,
-		mux,
-		HTTPServiceName(defaultOPSServiceName),
+		ServiceName(defaultOPSServiceName),
+		ServerOptions(func(srv *http.Server) {
+			srv.Handler = mux
+		}),
 	)
 }

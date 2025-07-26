@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/im-kulikov/gonfig"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -156,8 +155,6 @@ func TestWithConfig(t *testing.T) {
 			config.WithCustomizeLoaderConfig(func(c *gonfig.Config) {
 				c.Args = append(c.Args, "--config", file.Name())
 			})))
-
-	spew.Dump(example)
 }
 
 type testHandler struct {
