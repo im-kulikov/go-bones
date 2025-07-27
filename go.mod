@@ -3,7 +3,7 @@ module github.com/im-kulikov/go-bones
 go 1.24
 
 require (
-	github.com/im-kulikov/gonfig v0.5.1
+	github.com/im-kulikov/gonfig v0.5.2
 	github.com/prometheus/client_golang v1.22.0
 	github.com/stretchr/testify v1.10.0
 	go.opentelemetry.io/otel v1.37.0

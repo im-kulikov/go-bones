@@ -12,20 +12,29 @@ import (
 // nolint:gochecknoglobals
 var defaultLogger atomic.Pointer[Logger]
 
-// Init initializes the default logger with the given configuration, handler,
-// and optional slog transformers.
+// Init initializes the default logger with the given configuration and options.
 // The default logger is set globally, making it available for top-level functions
 // such as Debug, Info, Warn, and Error.
 //
 // Parameters:
 //   - cfg: Logger configuration.
-//   - handler: A slog.Handler instance to process log records.
-//   - transformers: Optional slogTransformer functions to modify log records.
+//   - opts: Optional configuration options that can include:
+//   - Custom handler via WithHandler
+//   - Log transformers via WithTransformers
+//   - Output destination via WithOutput
+//   - Log level via WithLevel
 //
 // Returns:
 //   - A pointer to the initialized Logger.
-func Init(cfg config.Logger, handler Handler, transformers ...slogTransformer) *Logger {
-	logger := New(cfg, handler, transformers...)
+func Init(cfg config.Logger, opts ...Option) *Logger {
+	var o options
+	for _, option := range opts {
+		option(&o)
+	}
+
+	o.setDefaults()
+
+	logger := New(cfg, o.handler, o.transformers...)
 	defaultLogger.Store(logger)
 
 	return logger
