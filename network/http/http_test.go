@@ -120,14 +120,14 @@ func Test_NewHTTPServer_With_TLS(t *testing.T) {
 	wait := make(chan struct{})
 	go func() {
 		close(done)
-		assert.ErrorIs(t, srv.Start(ctx), service.ErrCancelCalled)
+		assert.NoError(t, srv.Start(ctx))
 		close(wait)
 	}()
 
 	<-done
 	defer func() { <-wait }()
 
-	time.Sleep(100 * time.Millisecond) // wait for start server
+	time.Sleep(100 * time.Millisecond) // wait for the start server
 	uri, err := url.Parse("https://" + cfg.Address)
 	require.NoError(t, err)
 

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/im-kulikov/go-bones"
 	"github.com/im-kulikov/go-bones/config"
@@ -97,7 +99,7 @@ func NewServer(
 	}
 
 	return service.NewLauncher(options.name, options.listen, func(ctx context.Context) {
-		options.InfoContext(ctx, "shutdown http service",
+		options.InfoContext(ctx, "shutdown gracefully done",
 			logger.String("service", options.name),
 			logger.String("address", options.Addr))
 	}), nil
@@ -150,6 +152,9 @@ func prepareServer(
 		opt(options)
 	}
 
+	// add prefixes:
+	options.Logger = logger.Named(log, "go-bones", "http-server")
+
 	return options, nil
 }
 
@@ -185,21 +190,30 @@ func (h *serverOptions) listen(top context.Context) error {
 	ctx, cancel := context.WithCancelCause(top)
 	defer cancel(context.Canceled)
 
-	go func() {
-		if err := h.serve(); err != nil {
-			cancel(err)
-		}
-	}()
+	var wg sync.WaitGroup
 
-	<-ctx.Done()
-	{ // shutdown http.Server
-		out, done := context.WithTimeout(context.Background(), h.base.ShutdownTimeout)
+	wg.Add(1)
+	context.AfterFunc(ctx, func() { // shutdown http.Server
+		defer wg.Done()
+
+		h.InfoContext(ctx, "try to graceful shutdown",
+			logger.String("name", h.name))
+
+		out, done := context.WithTimeout(context.Background(), time.Millisecond)
 		defer done()
 
 		if err := h.Shutdown(out); err != nil {
-			return errors.Join(ErrHTTPShutdownServer, err, context.Cause(ctx))
+			h.ErrorContext(ctx, "something went wrong",
+				logger.String("name", h.name),
+				logger.Err(errors.Join(ErrHTTPShutdownServer, err, context.Cause(ctx))))
 		}
+	})
+
+	defer wg.Wait()
+
+	if err := h.serve(); err != nil {
+		cancel(err)
 	}
 
-	return context.Cause(ctx)
+	return nil
 }

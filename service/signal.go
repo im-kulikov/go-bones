@@ -41,7 +41,6 @@ func signalContextRoutine(
 	signals ...os.Signal,
 ) (context.Context, context.CancelCauseFunc, handler) {
 	ctx, cancel := context.WithCancelCause(top)
-
 	out := make(chan os.Signal, 1)
 	signal.Notify(out, signals...)
 
@@ -51,7 +50,6 @@ func signalContextRoutine(
 		}
 
 		var err error
-
 		select {
 		case sig := <-out:
 			err = ErrReceivedSignal(sig)

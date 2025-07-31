@@ -1,8 +1,10 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"sync"
@@ -10,12 +12,32 @@ import (
 	"testing"
 	"time"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/im-kulikov/go-bones"
 	"github.com/im-kulikov/go-bones/logger"
 )
+
+func Test_defaultErrorsIgnore(t *testing.T) {
+	cases := []struct {
+		name string
+		errs error
+	}{
+		{name: "default", errs: ErrOsSignal},
+		{name: "signals", errs: fmt.Errorf("%w: %v", ErrOsSignal, os.Interrupt)},
+		{name: "context cancel", errs: context.Canceled},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.True(t, containsError(tc.errs, defaultIgnoredErrors...))
+			require.True(t, containsError(tc.errs, errors.Join(defaultIgnoredErrors...)))
+		})
+	}
+}
 
 func Test_groupErrors(t *testing.T) {
 	cases := []struct {
@@ -36,7 +58,10 @@ func Test_groupErrors(t *testing.T) {
 }
 
 func TestRun_Success(t *testing.T) {
-	log := logger.ForTests()
+	buf := new(bytes.Buffer)
+	log := logger.ForTests(
+		logger.TestLoggerWriter(buf),
+		logger.TestLoggerWriteToTB(t))
 
 	mockSvc := new(mockService)
 	mockSvc.name = "testService"
@@ -49,20 +74,27 @@ func TestRun_Success(t *testing.T) {
 			cfg.shutdown = time.Millisecond * 100
 			cfg.signal = append(cfg.signal, syscall.SIGUSR1)
 		},
+		WithService(NewLauncher("test", func(ctx context.Context) error {
+			<-ctx.Done()
+
+			return ctx.Err()
+		})),
 	}
 
 	errChan := make(chan error, 1)
-	go func() {
-		errChan <- Run(log, options...)
-	}()
+	go func() { errChan <- Run(log, options...) }()
 
-	time.Sleep(time.Millisecond * 10)
-	process, err := os.FindProcess(os.Getpid())
-	require.NoError(t, err)
-	require.NoError(t, process.Signal(syscall.SIGUSR1))
+	time.Sleep(time.Millisecond * 100)
+	require.NoError(t, syscall.Kill(syscall.Getpid(), syscall.SIGUSR1))
 
-	require.NoError(t, <-errChan)
-	mockSvc.AssertExpectations(t)
+	select {
+	case err := <-errChan:
+		require.NoError(t, err, spew.Sdump(err))
+		require.Contains(t, buf.String(), syscall.SIGUSR1.String())
+		mockSvc.AssertExpectations(t)
+	case <-time.After(time.Hour):
+		t.Fatal("signal not received")
+	}
 }
 
 func TestRunContext_Success(t *testing.T) {
@@ -97,9 +129,11 @@ func TestRunContext_Success(t *testing.T) {
 func TestRunContext_Failure(t *testing.T) {
 	log := logger.ForTests()
 
+	errStart := bones.Error("start error")
+
 	mockSvc := new(mockService)
 	mockSvc.name = "testService"
-	mockSvc.On("Start", mock.Anything).Return(errors.New("start error")).Once()
+	mockSvc.On("Start", mock.Anything).Return(errStart).Once()
 	mockSvc.On("Stop", mock.Anything).Return().Once()
 
 	options := []Option{
@@ -114,7 +148,7 @@ func TestRunContext_Failure(t *testing.T) {
 		errChan <- RunContext(t.Context(), log, options...)
 	}()
 
-	assert.Error(t, <-errChan)
+	assert.ErrorIs(t, <-errChan, errStart)
 	mockSvc.AssertExpectations(t)
 }
 

@@ -39,10 +39,10 @@ func Test_default(t *testing.T) {
 		WithTransformers(testTransformer(1)))
 
 	buf.WriteString("\n")
-	Debug(context.TODO(), "debug message")
-	Info(context.TODO(), "info message")
-	Warn(context.TODO(), "warn message")
-	Error(context.TODO(), "error message")
+	Debug("debug message")
+	Info("info message")
+	Warn("warn message")
+	Error("error message")
 
 	require.Equal(t, testDefaultOutput, buf.String())
 }
@@ -58,10 +58,10 @@ func Test_defaultWithDefaultLevel(t *testing.T) {
 		WithTransformers(testTransformer(1)))
 
 	buf.WriteString("\n")
-	Debug(context.TODO(), "debug message")
-	Info(context.TODO(), "info message")
-	Warn(context.TODO(), "warn message")
-	Error(context.TODO(), "error message")
+	Debug("debug message")
+	Info("info message")
+	Warn("warn message")
+	Error("error message")
 
 	expect := make([]string, 0, 5)
 	for _, line := range strings.Split(testDefaultOutput, "\n") {
@@ -88,10 +88,10 @@ func Test_WithHandler(t *testing.T) {
 		})))
 
 	buf.WriteString("\n")
-	Debug(context.TODO(), "debug message")
-	Info(context.TODO(), "info message")
-	Warn(context.TODO(), "warn message")
-	Error(context.TODO(), "error message")
+	Debug("debug message")
+	Info("info message")
+	Warn("warn message")
+	Error("error message")
 
 	require.Equal(t, testDefaultOutput, buf.String())
 }

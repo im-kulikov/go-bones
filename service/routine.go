@@ -19,7 +19,7 @@ type settings struct {
 	shutdown time.Duration
 }
 
-// Service interface for component that should be run as goroutine.
+// Service interface for a component that should be run as goroutine.
 type Service interface {
 	Name() string
 	Start(context.Context) error
@@ -36,13 +36,34 @@ var (
 
 	//nolint:gochecknoglobals
 	defaultIgnoredErrors = []error{
+		ErrOsSignal,
 		context.Canceled,
 		context.DeadlineExceeded,
 	}
 
 	//nolint:gochecknoglobals
-	defaultSignals = []os.Signal{syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM}
+	defaultSignals = []os.Signal{syscall.SIGINT, syscall.SIGTERM}
 )
+
+func containsError(err error, errs ...error) bool {
+	if errors.Is(errors.Join(errs...), err) {
+		return true
+	}
+
+	for _, e := range errs {
+		if errors.Is(err, e) {
+			return true
+		}
+
+		if v, ok := e.(interface{ Unwrap() []error }); !ok {
+			continue
+		} else if containsError(err, v.Unwrap()...) {
+			return true
+		}
+	}
+
+	return false
+}
 
 // Run starts multiple goroutines and ensures their graceful shutdown.
 //
@@ -80,7 +101,7 @@ func RunContext(top context.Context, log *logger.Logger, options ...Option) erro
 		option(&cfg)
 	}
 
-	l := logger.Named(log, "go-bones")
+	l := logger.Named(log, "go-bones", "service")
 	ctx, cancel, handleSignals := signalContextRoutine(top, cfg.signal...)
 
 	var wg sync.WaitGroup
@@ -91,7 +112,8 @@ func RunContext(top context.Context, log *logger.Logger, options ...Option) erro
 			defer wg.Done()
 
 			l.Info("starting service", logger.String("service", service.Name()))
-			if err := service.Start(ctx); err != nil && !errors.Is(cfg.ignore, err) {
+			err := service.Start(ctx)
+			if err != nil && !errors.Is(cfg.ignore, err) {
 				cancel(err)
 
 				l.Error("could not start service",
@@ -108,7 +130,7 @@ func RunContext(top context.Context, log *logger.Logger, options ...Option) erro
 	wg.Wait()
 	cancel(context.Canceled)
 
-	if err := context.Cause(ctx); err != nil && !errors.Is(cfg.ignore, err) {
+	if err := context.Cause(ctx); err != nil && !containsError(err, cfg.ignore) {
 		return err
 	}
 
@@ -129,15 +151,19 @@ func RunContext(top context.Context, log *logger.Logger, options ...Option) erro
 func shutdownServices(top context.Context, log *logger.Logger, cfg settings) {
 	<-top.Done()
 
-	ctx, cancel := context.WithTimeout(top, cfg.shutdown)
+	if err := context.Cause(top); errors.Is(err, ErrOsSignal) {
+		log.InfoContext(top, err.Error())
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.shutdown)
 	defer cancel()
 
-	log.Info("shutting down services")
+	log.InfoContext(ctx, "shutting down services")
 
 	var wg sync.WaitGroup
 	for _, service := range cfg.handle {
 		wg.Add(1)
-		log.Info("shutting down service", logger.String("service", service.Name()))
+		log.InfoContext(ctx, "shutting down service", logger.String("service", service.Name()))
 
 		go func() {
 			defer wg.Done()

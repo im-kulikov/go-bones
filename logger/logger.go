@@ -54,7 +54,7 @@ func applyHandler(cfg config.Logger, handler Handler) Handler {
 		values = append(values, String("name", cfg.AppName()))
 	}
 
-	// Add application version to the handler attributes, if provided.
+	// Add an application version to the handler attributes, if provided.
 	if cfg.AppVersion() != "" {
 		values = append(values, String("version", cfg.AppVersion()))
 	}

@@ -28,7 +28,7 @@ func Test_opsServer(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, lis.Close())
 
-	// set random address
+	// set a random address
 	cfg.Address = lis.Addr().String()
 
 	ops, err := NewOPSServer(cfg, log)
@@ -43,17 +43,15 @@ func Test_opsServer(t *testing.T) {
 	wait.Add(2)
 
 	go func() {
-		defer wait.Done()
-
 		<-ctx.Done()
 		ops.Stop(t.Context())
+		wait.Done()
 	}()
 
 	go func() {
-		defer wait.Done()
-
 		close(done)
-		assert.ErrorIs(t, ops.Start(ctx), service.ErrCancelCalled)
+		assert.NoError(t, ops.Start(ctx))
+		wait.Done()
 	}()
 
 	<-done // wait for run

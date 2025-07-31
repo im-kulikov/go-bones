@@ -14,7 +14,7 @@ type (
 	// NamedLogger represents a handler that can set a name-based prefix for log messages.
 	NamedLogger interface {
 		// Named creates a new handler with a message prefix based on the provided name.
-		Named(name string) Handler
+		Named(names ...string) Handler
 	}
 
 	// slogTransformer defines an interface for transforming log records.
@@ -133,9 +133,9 @@ func (h *wrappedHandler) Handle(ctx context.Context, original Record) error {
 //
 // Returns:
 //   - A new Logger instance with the prefix applied.
-func Named(log *Logger, name string) *Logger {
+func Named(log *Logger, name ...string) *Logger {
 	if handler, ok := log.Handler().(NamedLogger); ok {
-		return newLogger(handler.Named(name))
+		return newLogger(handler.Named(name...))
 	}
 
 	return log
@@ -148,12 +148,21 @@ func Named(log *Logger, name string) *Logger {
 //
 // Returns:
 //   - A new handler with the updated name prefix list.
-func (h *wrappedHandler) Named(name string) Handler {
+func (h *wrappedHandler) Named(names ...string) Handler {
+	items := make([]string, 0, len(names))
+	for _, item := range names {
+		if item == "" {
+			continue
+		}
+
+		items = append(items, item)
+	}
+
 	return &wrappedHandler{
 		conf: h.conf,
 		next: h.next,
 		list: h.list,
-		name: append(h.name, name),
+		name: append(h.name, items...),
 	}
 }
 

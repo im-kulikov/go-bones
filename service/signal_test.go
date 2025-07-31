@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSignalContext(t *testing.T) {
@@ -24,7 +25,7 @@ func TestSignalContext(t *testing.T) {
 
 	select {
 	case <-ctx.Done():
-		assert.ErrorIs(t, context.Cause(ctx), ErrOsSignal)
+		require.ErrorIs(t, context.Cause(ctx), ErrOsSignal)
 	case <-time.After(1 * time.Second):
 		t.Fatal("timeout waiting for signal context cancellation")
 	}
