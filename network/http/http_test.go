@@ -225,7 +225,7 @@ func Test_shouldFailOnListener(t *testing.T) {
 
 	log := logger.ForTests(logger.TestLoggerWriteToTB(t))
 
-	t.Run("should fail on listen", func(t *testing.T) { // should fail on listen
+	t.Run("should fail on listen", func(t *testing.T) { // should fail to listen
 		svc, err := NewServer(
 			cfg,
 			log,

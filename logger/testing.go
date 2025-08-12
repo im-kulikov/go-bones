@@ -35,11 +35,13 @@ func (t *tbWriter) Write(data []byte) (int, error) {
 	t.Lock()
 	defer t.Unlock()
 
-	if !t.Failed() {
+	select {
+	case <-t.Context().Done():
+		return len(data), nil
+	default:
 		t.Log(string(bytes.TrimSpace(data)))
+		return len(data), nil
 	}
-
-	return len(data), nil
 }
 
 // Write safely writes log data to the underlying writer, ensuring concurrency safety.

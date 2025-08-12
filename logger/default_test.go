@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 
@@ -29,6 +30,8 @@ level=ERROR msg="error message" app.name=test-app-name app.version=test-app-vers
 
 func Test_default(t *testing.T) {
 	var cfg config.Logger
+	require.NoError(t, config.Load(&cfg))
+
 	cfg.Secrets = append(cfg.Secrets, slog.TimeKey)
 	cfg.SetAppNameAndVersion("test-app-name", "test-app-version")
 
@@ -94,4 +97,64 @@ func Test_WithHandler(t *testing.T) {
 	Error("error message")
 
 	require.Equal(t, testDefaultOutput, buf.String())
+}
+
+func TestLogger_fromConfig(t *testing.T) {
+	t.Run("could not parse logger.level", func(t *testing.T) {
+		buf := new(bytes.Buffer)
+		def := defaultLogger.Load()
+		defaultLogger.Store(slog.New(slog.NewTextHandler(buf, nil)))
+
+		defer func() { defaultLogger.Store(def) }()
+
+		var cfg config.Logger
+		require.NoError(t, config.Load(&cfg))
+
+		cfg.Level = "unknown"
+
+		for range optionsFromConfig(cfg, nil) {
+		}
+
+		require.Contains(t, buf.String(), "could not parse logger.level")
+	})
+
+	t.Run("could not parse logger.format", func(t *testing.T) {
+		buf := new(bytes.Buffer)
+		def := defaultLogger.Load()
+		defaultLogger.Store(slog.New(slog.NewTextHandler(buf, nil)))
+
+		defer func() { defaultLogger.Store(def) }()
+
+		var cfg config.Logger
+		require.NoError(t, config.Load(&cfg))
+
+		cfg.Format = "unknown"
+
+		for range optionsFromConfig(cfg, nil) {
+		}
+
+		require.Contains(t, buf.String(), "could not parse logger.format")
+	})
+
+	t.Run("break on", func(t *testing.T) {
+		var cfg config.Logger
+		require.NoError(t, config.Load(&cfg))
+
+		cfg.Format = "json" // set JSON formatter, for example
+
+		buf := new(bytes.Buffer)
+		cnt := len(slices.Collect(optionsFromConfig(cfg, []Option{WithOutput(buf)})))
+		for i := range cnt {
+			var idx int
+			for range optionsFromConfig(cfg, []Option{WithOutput(buf)}) {
+				if idx == i {
+					break
+				}
+
+				idx++
+			}
+
+			require.NotPanics(t, func() { Init(cfg) })
+		}
+	})
 }

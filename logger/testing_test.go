@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
@@ -12,6 +13,17 @@ type stubTB struct {
 }
 
 func (t *stubTB) Log(args ...any) { t.Called(args...) }
+
+func (t *stubTB) Context() context.Context {
+	if t.TB == nil {
+		return nil
+	}
+
+	ctx, cancel := context.WithCancel(t.TB.Context())
+	defer cancel()
+
+	return ctx
+}
 
 func Test_ForTest(t *testing.T) {
 	tb := &stubTB{TB: t}

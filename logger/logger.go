@@ -38,7 +38,7 @@ func prepareTransformers(cfg config.Logger, transformers ...slogTransformer) []s
 }
 
 // applyHandler decorates the provided `handler` with application metadata.
-// It adds attributes like application name and version from the logger configuration.
+// It adds attributes like the application name and version from the logger configuration.
 //
 // Parameters:
 //   - cfg: Logger configuration containing application metadata.
@@ -49,7 +49,7 @@ func prepareTransformers(cfg config.Logger, transformers ...slogTransformer) []s
 func applyHandler(cfg config.Logger, handler Handler) Handler {
 	values := make([]any, 0, 2)
 
-	// Add application name to the handler attributes, if provided.
+	// Add the application name to the handler attributes, if provided.
 	if cfg.AppName() != "" {
 		values = append(values, String("name", cfg.AppName()))
 	}

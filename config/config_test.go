@@ -1,6 +1,7 @@
 package config
 
 import (
+	"log/slog"
 	"os"
 	"strings"
 	"sync"
@@ -32,23 +33,23 @@ type testWriter struct {
 const (
 	exampleConfigYAML = `---
 logger:
-  open-tracing: true
+  open_tracing: true
   secrets: ["test"]
 `
 	exampleFailConfigYAML = `---
 logger;
-  open-tracing: true
+  open_tracing: true
   secrets: ["test"]
 `
 
 	exampleConfigTOML = `
 [logger]
-open-tracing = true
+open_tracing = true
 secrets = [ "test" ]
 `
 	exampleConfigJSON = `{
 	"logger": {
-		"open-tracing": true,
+		"open_tracing": true,
 		"secrets": ["test"]
 	}
 }`
@@ -125,6 +126,7 @@ func Test_config(t *testing.T) {
 
 				require.True(t, cfg.Logger.OpenTracingEnabled)
 				require.Equal(t, []string{"test"}, cfg.Logger.Secrets)
+				require.NoError(t, new(slog.Level).UnmarshalText([]byte(cfg.Logger.Level)))
 			})
 		})
 	}

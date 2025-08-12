@@ -2,6 +2,8 @@ package logger
 
 import (
 	"context"
+	"io"
+	"iter"
 	"log/slog"
 	"sync/atomic"
 
@@ -13,6 +15,53 @@ import (
 var defaultLogger atomic.Pointer[Logger]
 
 func init() { defaultLogger.Store(slog.Default()) }
+
+// optionsFromConfig converts a config.Logger and a slice of additional Option
+// functions into an iter.Seq of Option functions. It applies configuration
+// values for AddSource, Level, and Format, falling back to defaults and logging
+// warnings if parsing fails.
+//
+// Supported formats:
+//   - `json`: JSON-formatted logs.
+//   - `text`: human-readable text logs (default).
+//
+// Supported levels (see slog.Level): DEBUG, INFO, WARN, ERROR
+//
+// Any extra Option functions in a slice of Option are appended after config-derived options.
+func optionsFromConfig(cfg config.Logger, opts []Option) iter.Seq[Option] {
+	return func(yield func(Option) bool) {
+		if !yield(WithSource(cfg.AddSource)) {
+			return
+		}
+
+		var lvl Level
+		if err := lvl.UnmarshalText([]byte(cfg.Level)); err != nil {
+			Warn("could not parse logger.level", String("level", cfg.Level), Err(err))
+		} else if !yield(WithLevel(lvl)) {
+			return
+		}
+
+		format := func(w io.Writer, o *HandlerOptions) Handler { return slog.NewTextHandler(w, o) }
+		switch cfg.Format {
+		case "json":
+			format = func(w io.Writer, o *HandlerOptions) Handler { return slog.NewJSONHandler(w, o) }
+		case "text":
+			// already set
+		default:
+			Warn("could not parse logger.format", String("format", cfg.Format))
+		}
+
+		if !yield(func(o *options) { o.format = format }) {
+			return
+		}
+
+		for _, option := range opts {
+			if !yield(option) {
+				return
+			}
+		}
+	}
+}
 
 // Init initializes the default logger with the given configuration and options.
 // The default logger is set globally, making it available for top-level functions
@@ -30,7 +79,7 @@ func init() { defaultLogger.Store(slog.Default()) }
 //   - A pointer to the initialized Logger.
 func Init(cfg config.Logger, opts ...Option) *Logger {
 	var o options
-	for _, option := range opts {
+	for option := range optionsFromConfig(cfg, opts) {
 		option(&o)
 	}
 
@@ -43,7 +92,7 @@ func Init(cfg config.Logger, opts ...Option) *Logger {
 }
 
 // Debug logs a message with LevelDebug severity using the default logger.
-// This is typically used for development and debugging purposes.
+// This is typically used for development and debugging.
 //
 // Parameters:
 //   - msg: The message to log.
@@ -53,7 +102,7 @@ func Debug(msg string, attrs ...Attr) {
 }
 
 // DebugContext logs a message with LevelDebug severity using the default logger.
-// This is typically used for development and debugging purposes.
+// This is typically used for development and debugging.
 //
 // Parameters:
 //   - ctx: The context containing additional metadata, such as deadlines or context-specific attributes.

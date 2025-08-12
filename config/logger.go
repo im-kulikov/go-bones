@@ -1,12 +1,24 @@
 package config
 
+// Logger defines configuration parameters for the application logger.
+// It allows configuring log level, output format, secret fields masking,
+// and enabling OpenTracing integration.
+//
+// - OpenTracingEnabled allows enabling opentracing for logger.
+//
+// - Secrets allow setting slice of log fields that should be marked as REDACTED.
+//
+// - Level allows setting the default logger level.
+//
+// - Format allows settings the default logger format.
+//
+// nolint:lll
 type Logger struct {
 	appSettings
 
-	// OpenTracingEnabled allows enabling opentracing for logger.
-	// nolint:lll
-	OpenTracingEnabled bool `env:"OPEN_TRACING_ENABLED" yaml:"open-tracing" json:"open-tracing" toml:"open-tracing" default:"false"`
-
-	// Secrets allow setting slice of log fields that should be marked as REDACTED.
-	Secrets []string `env:"SECRETS" yaml:"secrets" json:"secrets" toml:"secrets"`
+	OpenTracingEnabled bool     `env:"OPEN_TRACING_ENABLED" yaml:"open_tracing" json:"open_tracing" toml:"open_tracing" default:"false"`
+	Secrets            []string `env:"SECRETS"              yaml:"secrets"      json:"secrets"      toml:"secrets"`
+	Level              string   `env:"LEVEL"                yaml:"level"        json:"level"        toml:"level"        default:"info"  usage:"Allows to set level for default logger"`
+	Format             string   `env:"FORMAT"               yaml:"format"       json:"format"       toml:"format"       default:"text"  usage:"Allows to set format for default logger"`
+	AddSource          bool     `env:"ADD_SOURCE"           yaml:"add_source"   json:"add_source"   toml:"add_source"`
 }
