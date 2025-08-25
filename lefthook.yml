@@ -1,15 +1,53 @@
 # lefthook.yml
 
+output:
+  - meta           # Print lefthook version
+  - summary        # Print summary block (successful and failed steps)
+  - empty_summary  # Print summary heading when there are no steps to run
+  - success        # Print successful steps
+  - failure        # Print failed steps printing
+  - execution_info # Print `EXECUTE > ...` logging
+  - skips          # Print "skip" (i.e. no files matched)
+
 pre-commit:
   parallel: true
   jobs:
-    - name: deps & lint & test
-      glob: "*.go"
+    - name: deps
+      run: |
+        # Backup current go.mod and go.sum state
+        cp go.mod go.mod.backup
+        cp go.sum go.sum.backup 2>/dev/null || true
+
+        # Run go mod tidy
+        go mod tidy
+
+        # Compare with backup
+        if ! diff -q go.mod go.mod.backup >/dev/null 2>&1; then
+          echo "Changes detected in go.mod after go mod tidy"
+          echo "Diff:"
+          diff go.mod go.mod.backup || true
+          rm go.mod.backup go.sum.backup 2>/dev/null || true
+          exit 1
+        fi
+
+        if [ -f go.sum ] && [ -f go.sum.backup ]; then
+          if ! diff -q go.sum go.sum.backup >/dev/null 2>&1; then
+            echo "Changes detected in go.sum after go mod tidy"
+            echo "Diff:"
+            diff go.sum go.sum.backup || true
+            rm go.mod.backup go.sum.backup 2>/dev/null || true
+            exit 1
+          fi
+        fi
+
+        # Clean up backup files
+        rm go.mod.backup go.sum.backup 2>/dev/null || true
+    - name: lint & test
+      glob:
+        - "*.go"
+        - "*.yml"
       group:
         jobs:
-          - run: go mod tidy
-
           - run: make lint
             stage_fixed: true
-
           - run: make test
