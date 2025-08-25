@@ -6,7 +6,7 @@ import (
 	"os"
 )
 
-// options contains configuration settings for creating and customizing a logger.
+// options contain configuration settings for creating and customizing a logger.
 // It defines the log source flag, log level, output writer, output format,
 // handler, and optional log transformers.
 //

@@ -21,4 +21,5 @@ type Logger struct {
 	Level              string   `env:"LEVEL"                yaml:"level"        json:"level"        toml:"level"        default:"info"  usage:"Allows to set level for default logger"`
 	Format             string   `env:"FORMAT"               yaml:"format"       json:"format"       toml:"format"       default:"text"  usage:"Allows to set format for default logger"`
 	AddSource          bool     `env:"ADD_SOURCE"           yaml:"add_source"   json:"add_source"   toml:"add_source"`
+	AddAppInfo         bool     `env:"ADD_APP_INFO"         yaml:"add_app_info" json:"add_app_info" toml:"add_app_info"`
 }

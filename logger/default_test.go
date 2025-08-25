@@ -32,6 +32,7 @@ func Test_default(t *testing.T) {
 	var cfg config.Logger
 	require.NoError(t, config.Load(&cfg))
 
+	cfg.AddAppInfo = true
 	cfg.Secrets = append(cfg.Secrets, slog.TimeKey)
 	cfg.SetAppNameAndVersion("test-app-name", "test-app-version")
 
@@ -52,6 +53,7 @@ func Test_default(t *testing.T) {
 
 func Test_defaultWithDefaultLevel(t *testing.T) {
 	var cfg config.Logger
+	cfg.AddAppInfo = true
 	cfg.Secrets = append(cfg.Secrets, slog.TimeKey)
 	cfg.SetAppNameAndVersion("test-app-name", "test-app-version")
 
@@ -80,6 +82,7 @@ func Test_defaultWithDefaultLevel(t *testing.T) {
 
 func Test_WithHandler(t *testing.T) {
 	var cfg config.Logger
+	cfg.AddAppInfo = true
 	cfg.Secrets = append(cfg.Secrets, slog.TimeKey)
 	cfg.SetAppNameAndVersion("test-app-name", "test-app-version")
 

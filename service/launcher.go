@@ -30,7 +30,7 @@ type Launcher func(context.Context) error
 const ErrEmptyLauncher bones.Error = "empty launcher function"
 
 // NewLauncher creates and returns a new Service that runs the provided Launcher function.
-// If the function is nil, any subsequent call to Start returns ErrEmptyLauncher.
+// If the function is nil, any further call to Start returns ErrEmptyLauncher.
 // The optional onShutdown callbacks are invoked when Stop completes.
 func NewLauncher(name string, call Launcher, onShutdown ...func(context.Context)) Service {
 	return &launcher{

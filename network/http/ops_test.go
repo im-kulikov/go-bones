@@ -24,6 +24,7 @@ func Test_opsServer(t *testing.T) {
 	var cfg config.Ops
 	require.NoError(t, gonfig.SetDefaults(&cfg))
 
+	cfg.VersionEnabled = true
 	lis, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	require.NoError(t, lis.Close())
@@ -59,6 +60,8 @@ func Test_opsServer(t *testing.T) {
 		cfg.ExpVarsPath,
 		cfg.MetricsPath,
 		cfg.ProfilePath,
+		cfg.VersionPath,
+		cfg.VersionPath + "?format=json",
 	}
 
 	time.Sleep(time.Millisecond * 100) // wait for server up
@@ -67,21 +70,24 @@ func Test_opsServer(t *testing.T) {
 		uri, errBlock := url.Parse("//" + cfg.Address)
 		require.NoError(t, errBlock)
 
+		ref, errRef := url.Parse(link)
+		require.NoError(t, errRef)
+
 		uri.Scheme = "http"
-		req, errBlock := http.NewRequestWithContext(
+		req, errReq := http.NewRequestWithContext(
 			ctx,
 			http.MethodGet,
-			uri.JoinPath(link).String(),
+			uri.ResolveReference(ref).String(),
 			http.NoBody,
 		)
-		require.NoError(t, errBlock)
+		require.NoError(t, errReq)
 
 		t.Logf("Request #%d: %s", i, link)
 
-		resp, errBlock := http.DefaultClient.Do(req)
-		require.NoError(t, errBlock)
+		resp, errResp := http.DefaultClient.Do(req)
+		require.NoError(t, errResp)
 		require.NoError(t, resp.Body.Close())
-		require.Equal(t, http.StatusOK, resp.StatusCode)
+		require.Equal(t, http.StatusOK, resp.StatusCode, req.URL)
 	}
 
 	cancel()

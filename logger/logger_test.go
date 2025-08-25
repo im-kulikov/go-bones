@@ -40,14 +40,14 @@ func (s stubIDGenerator) NewSpanID(context.Context, trace.TraceID) trace.SpanID 
 
 // nolint:lll
 const attributesLogExpected = `
-level=INFO msg="group test" app.name=test-app-name app.version=test-app-version group.key=value
-level=INFO msg=test1 app.name=test-app-name app.version=test-app-version
-level=INFO msg=test2 app.name=test-app-name app.version=test-app-version
-level=INFO msg=test3 app.name=test-app-name app.version=test-app-version error="test error"
-level=INFO msg=test3 app.name=test-app-name app.version=test-app-version err="test error"
-level=INFO msg="[service] message from some service" app.name=test-app-name app.version=test-app-version key=value
-level=ERROR msg="tracing message" app.name=test-app-name app.version=test-app-version error="context canceled" ctxKey=ctxVal trace.span_id=0200000000000000 trace.trace_id=01000000000000000000000000000000
-level=INFO msg="message with multi attributes" app.name=test-app-name app.version=test-app-version String=string-value Int64=9223372036854775807 Int=9223372036854775807 Uint64=18446744073709551615 Float64=1.7976931348623157e+308 Bool=true Time=1970-01-01T03:01:40.000+03:00 Duration=1s Any=val`
+level=INFO msg="group test" group.key=value
+level=INFO msg=test1
+level=INFO msg=test2
+level=INFO msg=test3 error="test error"
+level=INFO msg=test3 err="test error"
+level=INFO msg="[service] message from some service" key=value
+level=ERROR msg="tracing message" error="context canceled" ctxKey=ctxVal trace.span_id=0200000000000000 trace.trace_id=01000000000000000000000000000000
+level=INFO msg="message with multi attributes" String=string-value Int64=9223372036854775807 Int=9223372036854775807 Uint64=18446744073709551615 Float64=1.7976931348623157e+308 Bool=true Time=1970-01-01T03:01:40.000+03:00 Duration=1s Any=val`
 
 func attrsToMap(attributes []attribute.KeyValue) map[attribute.Key]any {
 	out := make(map[attribute.Key]any, len(attributes))
@@ -189,12 +189,10 @@ func Test_applyHandler(t *testing.T) {
 	})
 
 	t.Run("should call without attrs", func(t *testing.T) { // should do nothing
-		var conf config.Logger
-
 		handler := new(testHandler)
 		handler.Test(t)
 		handler.Handler = slog.NewTextHandler(io.Discard, &HandlerOptions{Level: slog.LevelDebug})
 
-		New(conf, handler).Info("call without attrs")
+		New(config.Logger{AddAppInfo: true}, handler).Info("call without attrs")
 	})
 }

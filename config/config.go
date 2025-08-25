@@ -1,6 +1,8 @@
 package config
 
 import (
+	"runtime/debug"
+
 	"github.com/im-kulikov/gonfig"
 )
 
@@ -12,13 +14,13 @@ type settings struct {
 	options []gonfig.LoaderOption
 }
 
-// Option allows to customize configuration.
+// Option allows customizing configuration.
 type Option func(*settings)
 
-// WithName sets application name.
+// WithName sets the application name.
 func WithName(name string) Option { return func(s *settings) { s.name = name } }
 
-// WithVersion sets application version.
+// WithVersion sets the application version.
 func WithVersion(version string) Option { return func(s *settings) { s.version = version } }
 
 func WithParsers(loaders ...gonfig.Parser) Option {
@@ -66,9 +68,17 @@ func WithTOML() Option {
 	}
 }
 
+func (c *settings) setDefaults() {
+	if info, ok := debug.ReadBuildInfo(); ok {
+		c.name = info.Main.Path
+		c.version = info.Main.Version
+	}
+}
+
 func Load(v any, options ...Option) error {
 	var cfg settings
 
+	cfg.setDefaults()
 	for _, option := range options {
 		option(&cfg)
 	}

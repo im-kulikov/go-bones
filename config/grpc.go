@@ -20,7 +20,7 @@ type BaseGRPC struct {
 }
 
 // GRPCConfig is an interface defining configuration options for a gRPC server.
-// Addr returns the address the gRPC server will listen on.
+// Addr returns the address the gRPC server will listen to.
 // Base returns the BaseGRPC configuration struct for detailed settings.
 type GRPCConfig interface {
 	Addr() string

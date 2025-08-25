@@ -47,6 +47,10 @@ func prepareTransformers(cfg config.Logger, transformers ...slogTransformer) []s
 // Returns:
 //   - A new handler with embedded application metadata attributes.
 func applyHandler(cfg config.Logger, handler Handler) Handler {
+	if !cfg.AddAppInfo {
+		return handler
+	}
+
 	values := make([]any, 0, 2)
 
 	// Add the application name to the handler attributes, if provided.

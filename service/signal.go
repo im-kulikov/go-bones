@@ -18,7 +18,7 @@ const ErrCancelCalled = bones.Error("cancel called")
 // ErrOsSignal fires when os.Signal received.
 const ErrOsSignal = bones.Error("received signal")
 
-// SignalContext creates a context that is canceled when one of the specified signals is received.
+// SignalContext creates a context which canceled when one of the specified signals is received.
 // This function serves as an alternative to signal.NotifyContext but provides better introspection.
 func SignalContext(
 	top context.Context,

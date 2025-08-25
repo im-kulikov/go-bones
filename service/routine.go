@@ -19,7 +19,7 @@ type settings struct {
 	shutdown time.Duration
 }
 
-// Service interface for a component that should be run as goroutine.
+// Service interface for a component that should be run as a goroutine.
 type Service interface {
 	Name() string
 	Start(context.Context) error
@@ -32,8 +32,6 @@ type Enabler interface {
 }
 
 var (
-	_ = Run // prevent unused linter
-
 	//nolint:gochecknoglobals
 	defaultIgnoredErrors = []error{
 		ErrOsSignal,
@@ -140,7 +138,7 @@ func RunContext(top context.Context, log *logger.Logger, options ...Option) erro
 // shutdownServices gracefully shutdown all registered services
 // when the provided context is canceled.
 //
-// It listens for the cancellation signal from `top` context, then
+// It listens for the cancellation signal from the top context, then
 // initiates a shutdown sequence for all services defined in `cfg.handle`.
 // Each service is stopped concurrently while ensuring proper synchronization.
 //

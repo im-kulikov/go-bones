@@ -27,21 +27,6 @@ type (
 	HandlerOptions = slog.HandlerOptions
 )
 
-var ( // Predefined aliases for slog attribute functions.
-	_ = String
-	_ = Int64
-	_ = Int
-	_ = Uint64
-	_ = Float64
-	_ = Bool
-	_ = Time
-	_ = Duration
-	_ = Group
-	_ = Any
-	_ = Err
-	_ = NamedError
-)
-
 func newLogger(handler Handler) *Logger { return slog.New(handler) }
 
 // String creates a string attribute.
