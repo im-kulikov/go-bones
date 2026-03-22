@@ -10,16 +10,33 @@ import (
 	"github.com/im-kulikov/go-bones/config"
 )
 
-// defaultLogger is a globally accessible logger instance that can be shared across the application.
+// defaultLogger stores the process-wide fallback logger used by package-level helpers.
+//
+// This global is an intentional design choice, not an accidental hidden dependency.
+// The package keeps it for two reasons:
+//   - Package-level helpers such as Info and Error stay ergonomic;
+//   - Logging remains available before explicit logger initialization.
+//
+// The tradeoff is a shared mutable state. Callers that need strict isolation,
+// deterministic tests, or independently configured logging should avoid the
+// process-wide logger and use explicit instances created with New instead.
 // nolint:gochecknoglobals
 var defaultLogger atomic.Pointer[Logger]
 
 func init() { defaultLogger.Store(slog.Default()) }
 
-// optionsFromConfig converts a config.Logger and a slice of additional Option
-// functions into an iter.Seq of Option functions. It applies configuration
-// values for AddSource, Level, and Format, falling back to defaults and logging
-// warnings if parsing fails.
+// Default returns the current process-wide logger used by package-level logging helpers.
+// Prefer explicit logger instances when code should not depend on global process state.
+func Default() *Logger {
+	return defaultLogger.Load()
+}
+
+// optionsFromConfig translates config.Logger plus extra options into the option
+// sequence consumed by Init.
+//
+// Config-derived options are emitted first so explicit opts can still append more
+// behaviour. Invalid config values do not fail initialization; they fall back to
+// defaults and emit warnings through the current default logger.
 //
 // Supported formats:
 //   - `json`: JSON-formatted logs.
@@ -63,20 +80,12 @@ func optionsFromConfig(cfg config.Logger, opts []Option) iter.Seq[Option] {
 	}
 }
 
-// Init initializes the default logger with the given configuration and options.
-// The default logger is set globally, making it available for top-level functions
-// such as Debug, Info, Warn, and Error.
+// Init rebuilds the process-wide default logger from config and stores it globally.
 //
-// Parameters:
-//   - cfg: Logger configuration.
-//   - opts: Optional configuration options that can include:
-//   - Custom handler via WithHandler
-//   - Log transformers via WithTransformers
-//   - Output destination via WithOutput
-//   - Log level via WithLevel
-//
-// Returns:
-//   - A pointer to the initialized Logger.
+// This is the bridge between configuration loading and package-level logging helpers
+// such as Info or Error. After Init, all top-level logging functions immediately use
+// the newly constructed logger. Code that must avoid global state should use New
+// directly and pass the resulting logger explicitly.
 func Init(cfg config.Logger, opts ...Option) *Logger {
 	var o options
 	for option := range optionsFromConfig(cfg, opts) {
@@ -91,86 +100,46 @@ func Init(cfg config.Logger, opts ...Option) *Logger {
 	return logger
 }
 
-// Debug logs a message with LevelDebug severity using the default logger.
-// This is typically used for development and debugging.
-//
-// Parameters:
-//   - msg: The message to log.
-//   - attrs: Additional attributes to include in the log record.
+// Debug logs with LevelDebug using the current process-wide default logger.
 func Debug(msg string, attrs ...Attr) {
 	DebugContext(context.Background(), msg, attrs...)
 }
 
-// DebugContext logs a message with LevelDebug severity using the default logger.
-// This is typically used for development and debugging.
-//
-// Parameters:
-//   - ctx: The context containing additional metadata, such as deadlines or context-specific attributes.
-//   - msg: The message to log.
-//   - attrs: Additional attributes to include in the log record.
+// DebugContext logs with LevelDebug using the current process-wide default logger.
+// Context is passed through so context-bound attrs and tracing metadata can be attached.
 func DebugContext(ctx context.Context, msg string, attrs ...Attr) {
 	defaultLogger.Load().LogAttrs(ctx, slog.LevelDebug, msg, attrs...)
 }
 
-// Info logs a message with LevelInfo severity using the default logger.
-// This is typically used for general informational messages.
-//
-// Parameters:
-//   - msg: The message to log.
-//   - attrs: Additional attributes to include in the log record.
+// Info logs with LevelInfo using the current process-wide default logger.
 func Info(msg string, attrs ...Attr) {
 	InfoContext(context.Background(), msg, attrs...)
 }
 
-// InfoContext logs a message with LevelInfo severity using the default logger.
-// This is typically used for general informational messages.
-//
-// Parameters:
-//   - ctx: The context containing additional metadata, such as deadlines or context-specific attributes.
-//   - msg: The message to log.
-//   - attrs: Additional attributes to include in the log record.
+// InfoContext logs with LevelInfo using the current process-wide default logger.
+// Context is passed through so context-bound attrs and tracing metadata can be attached.
 func InfoContext(ctx context.Context, msg string, attrs ...Attr) {
 	defaultLogger.Load().LogAttrs(ctx, slog.LevelInfo, msg, attrs...)
 }
 
-// Warn logs a message with LevelWarn severity using the default logger.
-// This is typically used to indicate something unexpected but not necessarily an error.
-//
-// Parameters:
-//   - msg: The message to log.
-//   - attrs: Additional attributes to include in the log record.
+// Warn logs with LevelWarn using the current process-wide default logger.
 func Warn(msg string, attrs ...Attr) {
 	WarnContext(context.Background(), msg, attrs...)
 }
 
-// WarnContext logs a message with LevelWarn severity using the default logger.
-// This is typically used to indicate something unexpected but not necessarily an error.
-//
-// Parameters:
-//   - ctx: The context containing additional metadata, such as deadlines or context-specific attributes.
-//   - msg: The message to log.
-//   - attrs: Additional attributes to include in the log record.
+// WarnContext logs with LevelWarn using the current process-wide default logger.
+// Context is passed through so context-bound attrs and tracing metadata can be attached.
 func WarnContext(ctx context.Context, msg string, attrs ...Attr) {
 	defaultLogger.Load().LogAttrs(ctx, slog.LevelWarn, msg, attrs...)
 }
 
-// Error logs a message with LevelError severity using the default logger.
-// This is typically used to record error events.
-//
-// Parameters:
-//   - msg: The message to log.
-//   - attrs: Additional attributes to include in the log record.
+// Error logs with LevelError using the current process-wide default logger.
 func Error(msg string, attrs ...Attr) {
 	ErrorContext(context.Background(), msg, attrs...)
 }
 
-// ErrorContext logs a message with LevelError severity using the default logger.
-// This is typically used to record error events.
-//
-// Parameters:
-//   - ctx: The context containing additional metadata, such as deadlines or context-specific attributes.
-//   - msg: The message to log.
-//   - attrs: Additional attributes to include in the log record.
+// ErrorContext logs with LevelError using the current process-wide default logger.
+// Context is passed through so context-bound attrs and tracing metadata can be attached.
 func ErrorContext(ctx context.Context, msg string, attrs ...Attr) {
 	defaultLogger.Load().LogAttrs(ctx, slog.LevelError, msg, attrs...)
 }

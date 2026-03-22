@@ -19,14 +19,16 @@ type settings struct {
 	shutdown time.Duration
 }
 
-// Service interface for a component that should be run as a goroutine.
+const defaultShutdownTimeout = time.Second * 15
+
+// Service represents a long-running component managed by Run or RunContext.
 type Service interface {
 	Name() string
 	Start(context.Context) error
 	Stop(context.Context)
 }
 
-// Enabler allows check that service enabled.
+// Enabler allows optional services to declare whether they should run.
 type Enabler interface {
 	Enabled() bool
 }
@@ -75,7 +77,7 @@ func containsError(err error, errs ...error) bool {
 //   - options: Optional configuration parameters.
 //
 // Returns:
-//   - error: An error if any of the managed goroutines fail to start or stop properly.
+//   - `error`: An error if any of the managed goroutines fail to start or stop properly.
 func Run(log *logger.Logger, options ...Option) error {
 	return RunContext(context.Background(), log, options...)
 }
@@ -104,14 +106,10 @@ func RunContext(top context.Context, log *logger.Logger, options ...Option) erro
 
 	var wg sync.WaitGroup
 	for _, service := range cfg.handle {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			l.Info("starting service", logger.String("service", service.Name()))
 			err := service.Start(ctx)
-			if err != nil && !errors.Is(cfg.ignore, err) {
+			if err != nil && !containsError(err, cfg.ignore) {
 				cancel(err)
 
 				l.Error("could not start service",
@@ -119,10 +117,10 @@ func RunContext(top context.Context, log *logger.Logger, options ...Option) erro
 					logger.NamedError("cause", context.Cause(ctx)),
 					logger.Err(err))
 			}
-		}()
+		})
 	}
 
-	go handleSignals()
+	wg.Go(handleSignals)
 	defer shutdownServices(ctx, l, cfg)
 
 	wg.Wait()
@@ -149,25 +147,27 @@ func RunContext(top context.Context, log *logger.Logger, options ...Option) erro
 func shutdownServices(top context.Context, log *logger.Logger, cfg settings) {
 	<-top.Done()
 
-	if err := context.Cause(top); errors.Is(err, ErrOsSignal) {
+	if err := context.Cause(top); err != nil && errors.Is(err, ErrOsSignal) {
 		log.InfoContext(top, err.Error())
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), cfg.shutdown)
+	timeout := cfg.shutdown
+	if timeout <= 0 {
+		timeout = defaultShutdownTimeout
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	log.InfoContext(ctx, "shutting down services")
 
 	var wg sync.WaitGroup
 	for _, service := range cfg.handle {
-		wg.Add(1)
-		log.InfoContext(ctx, "shutting down service", logger.String("service", service.Name()))
-
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
+			log.InfoContext(ctx, "shutting down service",
+				logger.String("service", service.Name()))
 			service.Stop(ctx)
-		}()
+		})
 	}
 
 	wg.Wait()

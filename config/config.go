@@ -23,6 +23,7 @@ func WithName(name string) Option { return func(s *settings) { s.name = name } }
 // WithVersion sets the application version.
 func WithVersion(version string) Option { return func(s *settings) { s.version = version } }
 
+// WithParsers registers custom parsers in gonfig loader options.
 func WithParsers(loaders ...gonfig.Parser) Option {
 	return func(s *settings) {
 		for _, loader := range loaders {
@@ -31,7 +32,8 @@ func WithParsers(loaders ...gonfig.Parser) Option {
 	}
 }
 
-func WithParserInt(prepares ...gonfig.ParserInit) Option {
+// WithParserInit registers custom parser initializers in gonfig loader options.
+func WithParserInit(prepares ...gonfig.ParserInit) Option {
 	return func(s *settings) {
 		for _, preparer := range prepares {
 			s.options = append(s.options, gonfig.WithCustomParserInit(preparer))
@@ -39,14 +41,17 @@ func WithParserInt(prepares ...gonfig.ParserInit) Option {
 	}
 }
 
+// WithLoaderOptions appends raw gonfig loader options.
 func WithLoaderOptions(options ...gonfig.LoaderOption) Option {
 	return func(s *settings) { s.options = append(s.options, options...) }
 }
 
+// WithCustomizeLoaderConfig registers a callback that mutates gonfig.Config before loading.
 func WithCustomizeLoaderConfig(handler func(*gonfig.Config)) Option {
 	return func(s *settings) { s.options = append(s.options, gonfig.WithConfig(handler)) }
 }
 
+// WithYAML enables YAML parsing and makes it the preferred parser kind.
 func WithYAML() Option {
 	return func(s *settings) {
 		s.kind = gonfig.ParserYAML
@@ -54,6 +59,7 @@ func WithYAML() Option {
 	}
 }
 
+// WithJSON enables JSON parsing and makes it the preferred parser kind.
 func WithJSON() Option {
 	return func(s *settings) {
 		s.kind = gonfig.ParserJSON
@@ -61,6 +67,7 @@ func WithJSON() Option {
 	}
 }
 
+// WithTOML enables TOML parsing and makes it the preferred parser kind.
 func WithTOML() Option {
 	return func(s *settings) {
 		s.kind = gonfig.ParserTOML
@@ -75,6 +82,8 @@ func (c *settings) setDefaults() {
 	}
 }
 
+// Load fills v from configuration sources configured through Option values.
+// YAML loading is enabled by default when no parser option was supplied.
 func Load(v any, options ...Option) error {
 	var cfg settings
 

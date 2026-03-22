@@ -36,6 +36,11 @@ lint: ## Run Golang linters aggregator
 	$(info $(M) running linters...)
 	@golangci-lint run -v --timeout 5m0s ./...
 
+.PHONY: vet
+vet: ## Run go vet
+	$(info $(M) running go vet...)
+	@$(GO) vet ./...
+
 .PHONY: install-tools
 install-tools: $(GOBIN) ## Install tools needed for development
 	$(info $(M) install tools needed for development...)

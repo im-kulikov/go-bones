@@ -6,6 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -43,7 +44,9 @@ func newWorkers(l *logger.Logger, shutdown ...func(context.Context)) *workers {
 					cnt++
 				}
 			}
-		}, shutdown...)
+		},
+			WithLauncherLogger(log),
+			WithLauncherShutdownHooks(shutdown...))
 
 		launchers[i] = wrk.(*launcher)
 	}
@@ -69,6 +72,30 @@ func Test_Workers(t *testing.T) {
 			ErrEmptyLauncher)
 	})
 
+	t.Run("should reject start after stop has begun", func(t *testing.T) {
+		started := make(chan struct{})
+		wrk := NewLauncher("simple", func(ctx context.Context) error {
+			close(started)
+			<-ctx.Done()
+
+			return context.Cause(ctx)
+		})
+
+		runDone := make(chan error, 1)
+		go func() {
+			runDone <- wrk.Start(t.Context())
+		}()
+
+		<-started
+
+		stopCtx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		wrk.Stop(stopCtx)
+
+		require.ErrorIs(t, wrk.Start(t.Context()), ErrStopsLauncher)
+		require.ErrorIs(t, <-runDone, context.Canceled)
+	})
+
 	t.Run("should not run launcher on cancelled context", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), time.Nanosecond)
 		defer cancel()
@@ -80,90 +107,100 @@ func Test_Workers(t *testing.T) {
 			return context.Cause(top)
 		})
 
-		require.NoError(t, RunContext(ctx, log, WithService(wrk)))
+		require.NoError(t, RunContext(ctx, log,
+			WithShutdownTimeout(time.Nanosecond),
+			WithService(wrk)))
 	})
 
 	t.Run("should not be blocked", func(t *testing.T) {
-		wrk := NewLauncher("test", func(ctx context.Context) error {
-			<-ctx.Done()
+		synctest.Test(t, func(t *testing.T) {
+			wrk := NewLauncher("test", func(ctx context.Context) error {
+				<-ctx.Done()
 
-			time.Sleep(time.Second)
+				return nil
+			})
 
-			return nil
+			{ // when we stop without a start, stop should return immediately
+				ctx, cancel := context.WithTimeout(t.Context(), time.Millisecond)
+				defer cancel()
+
+				now := time.Now()
+				require.NotPanics(t, func() { wrk.Stop(ctx) })
+				require.Zero(t, time.Since(now))
+			}
 		})
 
-		{ // when we stop without start, we should wait
-			ctx, cancel := context.WithTimeout(t.Context(), time.Millisecond)
+		synctest.Test(t, func(t *testing.T) {
+			started := make(chan struct{})
+			released := make(chan struct{})
+			wrk := NewLauncher("test", func(ctx context.Context) error {
+				close(started)
+				<-ctx.Done()
+				<-released
+
+				return nil
+			})
+
+			runDone := make(chan error, 1)
+			go func() { runDone <- wrk.Start(t.Context()) }()
+
+			<-started
+			synctest.Wait()
+
+			stopCtx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
 			defer cancel()
 
-			now := time.Now()
-			require.NotPanics(t, func() { wrk.Stop(ctx) })
+			start := time.Now()
+			require.NotPanics(t, func() { wrk.Stop(stopCtx) })
+			require.Equal(t, 10*time.Millisecond, time.Since(start))
 
-			// should exit from launcher.Stop on context.DeadlineExceeded
-			require.Greater(t, time.Since(now), time.Millisecond)
-		}
-
-		{ // when start and stop
-			now := time.Now()
-
-			ctx, cancel := context.WithTimeout(t.Context(), time.Millisecond*10)
-			defer cancel()
-
-			go func() { assert.NoError(t, wrk.Start(ctx)) }()
-
-			<-time.After(time.Millisecond * 5)
-
-			require.NotPanics(t, func() { wrk.Stop(ctx) })
-			require.InDelta(
-				t,
-				time.Since(now),
-				time.Millisecond*12,
-				float64(time.Millisecond*5),
-			) // 5ms lags
-		}
+			close(released)
+			synctest.Wait()
+			require.NoError(t, <-runDone)
+		})
 	})
 
 	t.Run("should run multiple workers and stop all", func(t *testing.T) {
-		log := logger.ForTests()
-		wrk := newWorkers(log)
+		synctest.Test(t, func(t *testing.T) {
+			log := logger.ForTests()
+			wrk := newWorkers(log)
 
-		log.Info("test")
+			log.Info("test")
 
-		ctx, cancel := context.WithTimeout(t.Context(), time.Millisecond*200)
-		defer cancel()
+			ctx, cancel := context.WithTimeout(t.Context(), time.Millisecond*200)
+			defer cancel()
 
-		var wg sync.WaitGroup
-		done := make(chan struct{})
+			done := make(chan struct{})
+			var wg sync.WaitGroup
+			wg.Go(func() {
+				close(done)
+				assert.NoError(t, RunContext(ctx, log, wrk.Options()...))
+			})
 
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+			<-done
+			synctest.Wait()
 
-			close(done)
-			assert.NoError(t, RunContext(ctx, log, wrk.Options()...))
-		}()
-
-		<-done
-		<-ctx.Done()
-
-		wg.Wait()
+			wg.Wait()
+		})
 	})
 }
 
 func Test_onShutdown(t *testing.T) {
-	var inc atomic.Int32
+	synctest.Test(t, func(t *testing.T) {
+		var inc atomic.Int32
 
-	fun := func(context.Context) {
-		t.Helper()
-		assert.NotEmpty(t, inc.Add(1))
-	}
+		fun := func(context.Context) {
+			t.Helper()
+			assert.NotEmpty(t, inc.Add(1))
+		}
 
-	log := logger.ForTests()
-	wrk := newWorkers(log, fun)
-	ctx, cancel := context.WithTimeout(t.Context(), time.Millisecond*100)
-	defer cancel()
+		log := logger.ForTests()
+		wrk := newWorkers(log, fun)
+		ctx, cancel := context.WithTimeout(t.Context(), time.Millisecond*100)
+		defer cancel()
 
-	options := wrk.Options()
-	require.NoError(t, RunContext(ctx, log, options...))
-	require.Equal(t, int32(len(wrk.launchers)), inc.Load())
+		options := wrk.Options()
+		require.NoError(t, RunContext(ctx, log, options...))
+		require.Equal(t, int32(len(wrk.launchers)), inc.Load())
+	})
 }

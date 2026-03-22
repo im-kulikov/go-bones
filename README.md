@@ -9,628 +9,634 @@
 ![GitHub](https://img.shields.io/github/license/im-kulikov/go-bones.svg?style=popout)
 [![Dependabot Status](https://img.shields.io/badge/dependabot-active-brightgreen?logo=dependabot)](https://dependabot.com)
 
-* [Makefile](#makefile)
-* [Examples](#examples)
-* [Config](#config)
-    + [Base flags](#base-flags)
-    + [Envs](#envs)
-* [Logger](#logger)
-* [Service runner (goroutine manager) component](#service-runner--goroutine-manager--component)
-* [Web services](#web-services)
-    + [OPS service](#ops-service)
-    + [HTTP custom service](#http-custom-service)
-    + [gRPC custom service](#grpc-custom-service)
-* [Tracing component](#tracing-component)
-    + [Preconfigured Jaeger](#preconfigured-jaeger)
-    + [gRPC](#grpc)
-        - [Examples for grpc.Conn](#examples-for-grpcconn)
-        - [Examples for grpc.Server](#examples-for-grpcserver)
-    + [HTTP](#http)
-        - [Examples for http.Client](#examples-for-httpclient)
-        - [Examples for http.Server](#examples-for-httpserver)
+`go-bones` is a small application foundation for Go services. It provides:
 
-Production and kubernetes ready preconfigured library that contains several components for our projects
-- configuration (based on env)
-- logger (wrapped zap.SugaredLogger)
-- service (runner manager for transport servers and workers)
-- web (http / gRPC transport servers)
-- tracer (jaeger)
+- configuration loading via `config`
+- structured logging via `logger`
+- lifecycle orchestration via `service`
+- HTTP, gRPC, and OPS transports via `network/http` and `network/grpc`
+- OpenTelemetry bootstrap via `tracer`
 
-## Makefile
+The library is intentionally opinionated:
 
-| Command                    | Description                                                            |
-|----------------------------|------------------------------------------------------------------------|
-| help                       | Show this help                                                         |
-| deps                       | Ensure dependencies                                                    |
-| lint                       | Run Golang linters aggregator                                          |
-| install-tools              | Install tools needed for development                                   |
-| test                       | Run all tests (pass package as argument if you want test specific one) |
+- use one config struct with embedded `config.Base`
+- initialize logging once at startup
+- run long-lived components through `service.Run`
+- expose operational endpoints through the OPS server
+- prefer standard `OTEL_*` environment variables for telemetry configuration
 
+## Contents
 
-## Examples
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Configuration Model](#configuration-model)
+- [Logger](#logger)
+- [Lifecycle Runner](#lifecycle-runner)
+- [HTTP Service](#http-service)
+- [gRPC Service](#grpc-service)
+- [OPS Service](#ops-service)
+- [OpenTelemetry](#opentelemetry)
+- [Make Targets](#make-targets)
 
-*Notice* You don't need to use flags, all supported flags already exist in `config` component.
-We propose to use environment variables instead of custom project flags, configuration files or something else.
-```
-Usage:
+## Installation
 
-  -V, --version    show current version
-  -h, --help       show this help message
-      --markdown   generate env markdown table
-      --validate   validate config
+```bash
+go get github.com/im-kulikov/go-bones
 ```
 
-*Notice* If you need add description for your custom application config option, just add it to field struct description,
-for example:
+## Quick Start
 
-```go
-package main
-
-import "github.com/im-kulikov/go-bones/config"
-
-type CustomAppSettings struct {
-	config.Base // we propose to include base configuration
-
-	// App specific settings
-	MyParameter string `env:"MY_PARAMETER" usage:"custom description"`
-
-	MyStructure struct {
-		// -> MY_STRUCTURE_FIELD_ONE
-		FieldOne int `env:"FIELD_ONE" default:"10"`
-		// -> MY_STRUCTURE_FIELD_TWO
-		FieldTwo string `env:"FIELD_TWO" default:"some default value"`
-	}
-}
-```
-
-*Notice:* You must include base configuration into app custom settings struct:
-
-```go
-package main
-
-import "github.com/im-kulikov/go-bones/config"
-
-type CustomAppSettings struct {
-	config.Base
-
-    // AppSpecificSettings...
-}
-```
-
-so you can use them out of the box, simple example of `main.go`
+This is the intended shape of an application built on top of `go-bones`.
 
 ```go
 package main
 
 import (
-    "context"
-    "os/signal"
-    "syscall"
+	"context"
+	"errors"
+	"os"
+	"time"
 
-    "github.com/im-kulikov/go-bones/config"
-    "github.com/im-kulikov/go-bones/logger"
-    "github.com/im-kulikov/go-bones/service"
-    "github.com/im-kulikov/go-bones/tracer"
-    "github.com/im-kulikov/go-bones/web"
+	"google.golang.org/grpc/health"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
+
+	"github.com/im-kulikov/go-bones/config"
+	"github.com/im-kulikov/go-bones/logger"
+	"github.com/im-kulikov/go-bones/network/grpc"
+	"github.com/im-kulikov/go-bones/network/http"
+	"github.com/im-kulikov/go-bones/service"
+	"github.com/im-kulikov/go-bones/tracer"
 )
 
-type settings struct {
-    config.Base
+type appConfig struct {
+	config.Base `env:",squash" yaml:",inline" json:",inline" toml:",inline"`
 
-    API web.HTTPConfig `env:"API"`
-
-    ShouldHaveDefaultValue int `env:"MY_KEY" default:"100500"`
+	HTTP httpConfig `env:"HTTP" yaml:"http" json:"http" toml:"http"`
+	GRPC grpcConfig `env:"GRPC" yaml:"grpc" json:"grpc" toml:"grpc"`
+	App  runtimeConfig `env:"APP" yaml:"app" json:"app" toml:"app"`
 }
 
-var (
-	version = "dev"
-    appName = "example"
-)
-
-func (c settings) Validate(ctx context.Context) error {
-    // check that your fields is ok...
-
-    return c.Base.Validate(ctx)
+type runtimeConfig struct {
+	ShutdownTimeout time.Duration `env:"SHUTDOWN_TIMEOUT" yaml:"shutdown_timeout" default:"20s"`
 }
+
+type httpConfig struct {
+	config.BaseHTTP `env:",squash" yaml:",inline" json:",inline" toml:",inline"`
+	Address         string `env:"ADDRESS" yaml:"address" json:"address" toml:"address" default:":8080"`
+}
+
+func (c httpConfig) Addr() string          { return c.Address }
+func (c httpConfig) Base() config.BaseHTTP { return c.BaseHTTP }
+
+type grpcConfig struct {
+	config.BaseGRPC `env:",squash" yaml:",inline" json:",inline" toml:",inline"`
+	Address         string `env:"ADDRESS" yaml:"address" json:"address" toml:"address" default:":9090"`
+}
+
+func (c grpcConfig) Addr() string          { return c.Address }
+func (c grpcConfig) Base() config.BaseGRPC { return c.BaseGRPC }
 
 func main() {
-    var cfg settings
+	var cfg appConfig
+	if err := config.Load(&cfg,
+		config.WithName("my-service"),
+		config.WithVersion("dev"),
+	); err != nil {
+		_, _ = os.Stderr.WriteString(err.Error() + "\n")
+		os.Exit(1)
+	}
 
-    ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
-    defer cancel()
+	log := logger.Init(cfg.Logger)
+	telemetry := tracer.Init(log, cfg.Tracer)
 
-    var err error
-    if err = config.Load(ctx, cfg.Base); err != nil {
-        logger.Default().Fatalf("could not prepare config: %s", err)
-    }
+	httpSvc, err := newHTTPService(cfg, log)
+	if err != nil {
+		log.Error("build http service", logger.Err(err))
+		os.Exit(1)
+	}
 
-    var log logger.Logger
-    if log, err = logger.New(cfg.Base.Logger,
-        logger.WithAppName(appName),
-        logger.WithAppVersion(version)); err != nil {
-        logger.Default().Fatalf("could not prepare logger: %s", err)
-    }
+	grpcSvc, err := newGRPCService(cfg, log)
+	if err != nil {
+		log.Error("build grpc service", logger.Err(err))
+		os.Exit(1)
+	}
 
-    var trace service.Service
-    if trace, err = tracer.Init(log, cfg.Base.Tracer); err != nil {
-        log.Fatalf("could not initialize tracer: %s", err)
-    }
+	opsSvc, err := http.NewOPSServer(cfg.OpsServer, log)
+	if err != nil {
+		log.Error("build ops service", logger.Err(err))
+		os.Exit(1)
+	}
 
-    ops := web.NewOpsServer(log, cfg.Base.Ops)
+	group := service.Compose(telemetry, opsSvc, httpSvc, grpcSvc)
+	if err = service.Run(log,
+		service.WithShutdownTimeout(cfg.App.ShutdownTimeout),
+		service.WithService(group),
+	); err != nil && !errors.Is(err, context.Canceled) {
+		log.Error("application stopped with error", logger.Err(err))
+		os.Exit(1)
+	}
+}
 
-    group := service.New(log,
-        service.WithService(ops),
-        service.WithService(trace),
-        service.WithShutdownTimeout(cfg.Base.Shutdown))
+func newHTTPService(cfg appConfig, log *logger.Logger) (service.Service, error) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("ok"))
+	})
 
-    if err = group.Run(context.Background()); err != nil {
-        log.Fatalf("something went wrong: %s", err)
-    }
+	return http.NewServer(
+		cfg.HTTP,
+		log,
+		http.ServiceName("api"),
+		http.WithOpenTelemetry(),
+		http.ServerOptions(func(srv *http.Server) {
+			srv.Handler = mux
+		}),
+	)
+}
+
+func newGRPCService(cfg appConfig, log *logger.Logger) (service.Service, error) {
+	return grpc.NewServer(
+		cfg.GRPC,
+		log,
+		grpc.ServiceName("rpc"),
+		grpc.WithOpenTelemetry(),
+		grpc.RegisterServices(func(server *grpc.Server) {
+			healthServer := health.NewServer()
+			healthServer.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
+			healthpb.RegisterHealthServer(server, healthServer)
+		}),
+	)
 }
 ```
 
-## Config
+## Configuration Model
 
-Contains default components configurations and base flags.
+`config.Load` is the entrypoint for application configuration.
 
-### Base flags
+Under the hood, `go-bones/config` uses [`gonfig`](https://github.com/im-kulikov/gonfig) as the loader engine.  
+`go-bones` adds:
 
+- the shared `config.Base` model
+- app name/version propagation into supported config sections
+- repository-friendly defaults such as YAML are enabled by default
+- a stable place for built-in logger, ops, and tracer config
+
+```go
+var cfg appConfig
+err := config.Load(&cfg,
+	config.WithName("my-service"),
+	config.WithVersion("1.2.3"),
+)
 ```
-  -V, --version    show current version
-  -h, --help       show this help message
-      --markdown   generate env markdown table
-      --validate   validate config
+
+Key points:
+
+- `config.Base` already includes `Logger`, `OpsServer`, and `Tracer`
+- YAML loading is enabled by default
+- app name and version are propagated into config sections that support them
+- `gonfig` still does the heavy lifting for env/YAML/JSON/TOML parsing
+- transport packages expect config types implementing:
+  - `config.HTTPConfig`
+  - `config.GRPCConfig`
+
+Typical custom config shape:
+
+```go
+type appConfig struct {
+	config.Base `env:",squash" yaml:",inline" json:",inline" toml:",inline"`
+
+	HTTP struct {
+		config.BaseHTTP `env:",squash" yaml:",inline" json:",inline" toml:",inline"`
+		Address string `env:"ADDRESS" yaml:"address" default:":8080"`
+	} `env:"HTTP" yaml:"http" json:"http" toml:"http"`
+
+	App struct {
+		WorkerInterval time.Duration `env:"WORKER_INTERVAL" yaml:"worker_interval" default:"15s"`
+	} `env:"APP" yaml:"app" json:"app" toml:"app"`
+}
 ```
 
-### Envs
+Representative YAML:
 
-| Name                        | Required | Default value | Usage                                          | Example                           |
-|-----------------------------|----------|---------------|------------------------------------------------|-----------------------------------|
-| SHUTDOWN_TIMEOUT            | false    | 5s            | allows to set custom graceful shutdown timeout |                                   |
-| OPS_ENABLED                 | false    | false         | allows to enable ops server                    |                                   |
-| OPS_ADDRESS                 | false    | :8081         | allows to set set ops address:port             |                                   |
-| OPS_NETWORK                 | false    | tcp           | allows to set ops listen network: tcp/udp      |                                   |
-| OPS_NO_TRACE                | false    | true          | allows to disable tracing                      |                                   |
-| OPS_METRICS_PATH            | false    | /metrics      | allows to set custom metrics path              |                                   |
-| OPS_HEALTHY_PATH            | false    | /healthy      | allows to set custom healthy path              |                                   |
-| OPS_PROFILE_PATH            | false    | /debug/pprof  | allows to set custom profiler path             |                                   |
-| LOGGER_ENCODING_CONSOLE     | false    | false         | allows to set user-friendly formatting         |                                   |
-| LOGGER_LEVEL                | false    | info          | allows to set custom logger level              |                                   |
-| LOGGER_TRACE                | false    | fatal         | allows to set custom trace level               |                                   |
-| LOGGER_SAMPLE_RATE          | false    | 1000          | allows to set sample rate                      |                                   |
-| TRACER_TYPE                 | false    | jaeger        | allows to set trace exporter type              |                                   |
-| TRACER_ENABLED              | false    | false         | allows to enable tracing                       |                                   |
-| TRACER_SAMPLER              | false    | 1             | allows to choose sampler                       |                                   |
-| TRACER_ENDPOINT             | false    |               | allows to set jaeger endpoint (one of)         | http://localhost:14268/api/traces |
-| TRACER_AGENT_HOST           | false    |               | allows to set jaeger agent host (one of)       | localhost                         |
-| TRACER_AGENT_PORT           | false    |               | allows to set jaeger agent port                | 6831                              |
-| TRACER_AGENT_RETRY_INTERVAL | false    | 15s           | allows to set retry connection timeout         |                                   |
+```yaml
+logger:
+  level: info
+  format: text
+  add_source: true
+  add_app_info: true
+  open_tracing: true
+  secrets:
+    - authorization
+    - api_key
 
-    (one off) - you can provide TRACER_ENDPOINT or TRACER_AGENT_HOST
-    1. TRACER_ENDPOINT - used for HTTP jaeger exporter
-    2. TRACER_AGENT_HOST and TRACER_AGENT_PORT - used for UDP exporter
+ops:
+  address: ":8090"
+  version_enabled: true
+
+tracer:
+  enabled: true
+  send_logs: true
+  send_metrics: true
+  use_http: true
+  endpoint: "otel-collector:4318"
+  insecure: true
+
+http:
+  address: ":8080"
+  shutdown_timeout: 10s
+
+grpc:
+  address: ":9090"
+  shutdown_timeout: 10s
+```
+
+### Loading configuration from a file
+
+`config.Load` can load configuration from a file through `gonfig` file loaders.
+
+To enable this, you need two things:
+
+1. Enable the parser you want:
+   - `config.WithYAML()`
+   - `config.WithJSON()`
+   - `config.WithTOML()`
+2. Add a root config field marked as a config-path flag:
+
+```go
+type appConfig struct {
+	config.Base `env:",squash" yaml:",inline"`
+
+	Config string `flag:"config,config:true"`
+
+	HTTP httpConfig `env:"HTTP" yaml:"http"`
+}
+```
+
+Then you can start the service with:
+
+```bash
+./my-service --config ./config.yaml
+```
+
+Example:
+
+```go
+var cfg appConfig
+err := config.Load(&cfg,
+	config.WithName("my-service"),
+	config.WithVersion("dev"),
+	config.WithYAML(),
+)
+```
+
+Notes:
+
+- if you do not specify a parser option, `config.Load` enables YAML by default
+- the `--config` flag is provided by `gonfig` through the `flag:"config,config:true"` tag
+- file loading is optional; the same config can still be fully driven by environment variables and flags
+
+### Configuration load order
+
+The effective load order follows `gonfig` semantics:
+
+1. defaults from struct tags
+2. config-path pre-scan from flags, for example `--config ./config.yaml`
+3. file loader (`YAML`, `JSON`, or `TOML`)
+4. environment variables
+5. command-line flags
+
+In practice this means:
+
+- file values override defaults
+- env variables override file values
+- flags have the highest priority
+
+This is usually the desired production behavior:
+
+- keep a baseline in a file
+- override sensitive or environment-specific values through env
+- use flags only for explicit local overrides or bootstrapping
+
+### Environment variables by module
+
+Built-in config blocks from `config.Base` are exposed through these prefixes:
+
+- `LOGGER_*`
+- `OPS_*`
+- `OTEL_*`
+
+Your own application blocks keep the same pattern. For example, if your config has:
+
+```go
+type appConfig struct {
+	config.Base `env:",squash" yaml:",inline"`
+
+	HTTP httpConfig `env:"HTTP" yaml:"http"`
+	GRPC grpcConfig `env:"GRPC" yaml:"grpc"`
+	App  runtimeConfig `env:"APP" yaml:"app"`
+}
+```
+
+then the derived env names look like:
+
+- `HTTP_ADDRESS`
+- `HTTP_SHUTDOWN_TIMEOUT`
+- `HTTP_TLS_ENABLED`
+- `GRPC_ADDRESS`
+- `GRPC_SHUTDOWN_TIMEOUT`
+- `GRPC_TLS_ENABLED`
+- `APP_SHUTDOWN_TIMEOUT`
+
+#### `LOGGER_*`
+
+| Env                           | Default | Meaning                                                                              |
+|-------------------------------|---------|--------------------------------------------------------------------------------------|
+| `LOGGER_OPEN_TRACING_ENABLED` | `false` | Enables bridging logger records into the process-wide OpenTelemetry logger provider. |
+| `LOGGER_SECRETS`              | empty   | Comma-separated field names to redact in logs.                                       |
+| `LOGGER_LEVEL`                | `info`  | Log level for the default logger.                                                    |
+| `LOGGER_FORMAT`               | `text`  | Output format: `text` or `json`.                                                     |
+| `LOGGER_ADD_SOURCE`           | `false` | Includes source file and line information.                                           |
+| `LOGGER_ADD_APP_INFO`         | `false` | Includes app metadata such as name and version in log output.                        |
+
+#### `OPS_*`
+
+| Env                       | Default          | Meaning                                      |
+|---------------------------|------------------|----------------------------------------------|
+| `OPS_ADDRESS`             | `:8090`          | Listen address for the OPS server.           |
+| `OPS_METRICS_PATH`        | `/metrics`       | Prometheus metrics endpoint path.            |
+| `OPS_PROFILE_PATH`        | `/debug/pprof`   | Base path for `pprof` handlers.              |
+| `OPS_EXP_VARS_PATH`       | `/debug/vars`    | `expvar` endpoint path.                      |
+| `OPS_VERSION_PATH`        | `/version`       | Version endpoint path.                       |
+| `OPS_VERSION_ENABLED`     | `false`          | Enables the version endpoint.                |
+| `OPS_READ_TIMEOUT`        | `0`              | HTTP read timeout for the OPS server.        |
+| `OPS_WRITE_TIMEOUT`       | `0`              | HTTP write timeout for the OPS server.       |
+| `OPS_READ_HEADER_TIMEOUT` | `0`              | HTTP read-header timeout for the OPS server. |
+| `OPS_IDLE_TIMEOUT`        | `0`              | HTTP idle timeout for the OPS server.        |
+| `OPS_SHUTDOWN_TIMEOUT`    | `30s`            | Graceful shutdown timeout.                   |
+| `OPS_MAX_HEADER_BYTES`    | `0`              | Max request header size.                     |
+| `OPS_TLS_ENABLED`         | `false`          | Enables TLS for the OPS server.              |
+| `OPS_TLS_CERT_FILE`       | empty            | TLS certificate path.                        |
+| `OPS_TLS_KEY_FILE`        | empty            | TLS private key path.                        |
+| `OPS_TLS_CLIENT_AUTH`     | `no-client-cert` | TLS client auth mode.                        |
+| `OPS_TLS_CA_CERT_FILE`    | empty            | CA certificate path for client verification. |
+| `OPS_TLS_MIN_VERSION`     | `TLS13`          | Minimum TLS version.                         |
+| `OPS_TLS_CIPHER_SUITES`   | empty            | Optional cipher suite list.                  |
+
+#### `OTEL_*` from `config.TracerConfig`
+
+These are repository-level fallback variables. Standard OpenTelemetry exporter variables still have priority.
+
+| Env                 | Default          | Meaning                                                            |
+|---------------------|------------------|--------------------------------------------------------------------|
+| `OTEL_ENABLED`      | `false`          | Enables repository OpenTelemetry bootstrap.                        |
+| `OTEL_SEND_LOGS`    | `false`          | Enables OTel log export path.                                      |
+| `OTEL_SEND_METRICS` | `false`          | Enables OTel metrics export path.                                  |
+| `OTEL_ENDPOINT`     | `localhost:4317` | Fallback OTLP endpoint when exporter-specific env is absent.       |
+| `OTEL_INSECURE`     | `true`           | Fallback insecure OTLP transport setting.                          |
+| `OTEL_USE_HTTP`     | `false`          | Fallback switch to OTLP HTTP when exporter protocol env is absent. |
+
+#### Standard `OTEL_*` variables
+
+These are the preferred runtime contracts for real deployments:
+
+| Env                                   | Meaning                                                                                          |
+|---------------------------------------|--------------------------------------------------------------------------------------------------|
+| `OTEL_SERVICE_NAME`                   | Explicit service name in OTel resource attributes.                                               |
+| `OTEL_RESOURCE_ATTRIBUTES`            | Additional resource attributes, for example `deployment.environment=prod,service.version=1.2.3`. |
+| `OTEL_PROPAGATORS`                    | Propagator list, for example `tracecontext,baggage`.                                             |
+| `OTEL_EXPORTER_OTLP_ENDPOINT`         | Common OTLP endpoint for all enabled signals.                                                    |
+| `OTEL_EXPORTER_OTLP_INSECURE`         | Common insecure flag for OTLP exporters.                                                         |
+| `OTEL_EXPORTER_OTLP_PROTOCOL`         | Common OTLP protocol, for example `grpc` or `http/protobuf`.                                     |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`  | Trace-specific OTLP endpoint.                                                                    |
+| `OTEL_EXPORTER_OTLP_TRACES_INSECURE`  | Trace-specific insecure flag.                                                                    |
+| `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL`  | Trace-specific protocol.                                                                         |
+| `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | Metrics-specific OTLP endpoint.                                                                  |
+| `OTEL_EXPORTER_OTLP_METRICS_INSECURE` | Metrics-specific insecure flag.                                                                  |
+| `OTEL_EXPORTER_OTLP_METRICS_PROTOCOL` | Metrics-specific protocol.                                                                       |
+| `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`    | Logs-specific OTLP endpoint.                                                                     |
+| `OTEL_EXPORTER_OTLP_LOGS_INSECURE`    | Logs-specific insecure flag.                                                                     |
+| `OTEL_EXPORTER_OTLP_LOGS_PROTOCOL`    | Logs-specific protocol.                                                                          |
 
 ## Logger
 
-Contains preconfigured `logger.Logger`
+The logger package wraps `log/slog` and exposes both explicit logger instances and a process-wide default logger.
+
+Typical startup:
 
 ```go
-package main
-
-import (
-    "github.com/im-kulikov/go-bones/logger"
-)
-
-var version string
-
-func main() {
-    sample := 1000
-
-    loggerConfig := logger.Config{
-        EncodingConsole: true,
-        Level:           "info",
-        Trace:           "fatal",
-        SampleRate:      &sample,
-    }
-
-    log, err := logger.New(loggerConfig,
-        logger.WithAppName("name"),
-        logger.WithAppVersion(version))
-
-    if err != nil {
-        logger.Default().Fatalf("could not prepare logger: %s", err)
-    }
-
-    _ = log
-
-    // ...
-}
+log := logger.Init(cfg.Logger)
 ```
 
-## Service runner (goroutine manager) component
+What `logger.Init` gives you:
 
-It allows concentrate on business logic and just pass
-services (Start/Stop/Name interface) into it.
+- log level and format from `config.Logger`
+- optional source locations
+- optional app metadata fields
+- secret masking
+- optional OpenTelemetry log bridge when `logger.open_tracing` is enabled and `tracer.Init(...)` installs a logger provider
+
+Package-level helpers are available:
 
 ```go
-package main
-
-import (
-    "context"
-    "errors"
-    "os/signal"
-    "time"
-
-    "github.com/im-kulikov/go-bones/logger"
-    "github.com/im-kulikov/go-bones/service"
-)
-
-type web struct{ service.Service }
-type ops struct{ service.Service }
-type run struct{ service.Service }
-
-const shutdownTimeout = time.Second * 5
-
-var errToIgnore = errors.New("should be ignored")
-
-var (
-    _ service.Service = (*web)(nil)
-    _ service.Service = (*ops)(nil)
-    _ service.Service = (*run)(nil)
-)
-
-func main() {
-    runService := new(run)
-    webService := new(web)
-    opsService := new(ops)
-
-    group := service.New(logger.Default(),
-        service.WithService(runService),
-        service.WithService(webService),
-        service.WithService(opsService),
-        service.WithIgnoreError(errToIgnore),
-        service.WithShutdownTimeout(shutdownTimeout))
-
-    ctx, cancel := signal.NotifyContext(context.Background())
-    defer cancel()
-
-    if err := group.Run(ctx); err != nil {
-        panic(err)
-    }
-}
+logger.Info("service started")
+logger.Error("request failed", logger.Err(err))
 ```
 
-## Web services
-
-Allows concentrate on business logic and use preconfigured http / gRPC services.
-
-### OPS service
-
-Contains next handlers (can be changed by configuration)
-- /healthy
-- /metrics
-- /debug/pprof
+For request-scoped fields, attach attributes to context:
 
 ```go
-package main
-
-import (
-    "github.com/im-kulikov/go-bones/logger"
-    "github.com/im-kulikov/go-bones/web"
-    "go.uber.org/zap"
+ctx = logger.AddContextAttrs(ctx,
+	logger.String("request_id", requestID),
+	logger.String("tenant", tenantID),
 )
 
-func main() {
-    log := logger.Default()
-    ops := web.NewOpsServer(log, web.OpsConfig{
-        Enabled: true,
-        Address: ":8081",
-        Network: "tcp",
-        NoTrace: false,
-
-        HealthyPath: "/custom-healthy-path",
-        MetricsPath: "/custom-metrics-path",
-        ProfilePath: "/custom-profile-path",
-    }, ...web.HealthChecker)
-
-	// http.Server with healthy, metrics and profiler and
-	// HealthChecker's worker that run health check for each passed component
-    _ = ops
-
-    // ...
-}
+log.InfoContext(ctx, "handled request")
 ```
 
-### HTTP custom service
+## Lifecycle Runner
+
+`service.Run` is the main orchestration primitive for long-lived components.
+
+Use it for:
+
+- HTTP servers
+- gRPC servers
+- telemetry bootstrap
+- background workers
+
+Example:
 
 ```go
-package main
+worker := service.NewLauncher("worker", func(ctx context.Context) error {
+	<-ctx.Done()
+	return context.Cause(ctx)
+})
 
-import (
-    "net/http"
-
-    "github.com/im-kulikov/go-bones/web"
+err := service.Run(log,
+	service.WithShutdownTimeout(20*time.Second),
+	service.WithService(worker, telemetry, opsSvc, httpSvc, grpcSvc),
 )
-
-func router() http.Handler { panic("implement me") }
-
-func main() {
-    handler := router()
-
-    custom := web.NewHTTPServer(
-        web.WithHTTPName("custom"),
-        web.WithHTTPHandler(handler),
-        web.WithHTTPConfig(web.HTTPConfig{
-            Enabled: true,
-            Address: ":8080",
-            Network: "tcp",
-        }))
-
-    _ = custom
-
-    // ...
-}
 ```
 
+Useful pieces:
 
-### gRPC custom service
+- `service.NewLauncher(...)` for wrapping a start function into a managed service
+- `service.Compose(...)` for grouping services without making the group itself independently runnable
+- `service.WithIgnoreError(...)` for expected shutdown errors
+
+## HTTP Service
+
+`network/http` owns the lifecycle of a standard `http.Server` and re-exports the most common stdlib HTTP types so application code usually does not need a second `net/http` import alias.
+
+Typical wiring:
 
 ```go
-package main
+handler := http.NewServeMux()
+handler.HandleFunc("/ready", func(w http.ResponseWriter, _ *http.Request) {
+	_, _ = w.Write([]byte("ok"))
+})
 
-import (
-    "github.com/im-kulikov/go-bones/web"
+svc, err := http.NewServer(
+	cfg.HTTP,
+	log,
+	http.ServiceName("api"),
+	http.WithOpenTelemetry(),
+	http.ServerOptions(func(srv *http.Server) {
+		srv.Handler = handler
+	}),
 )
-
-type service struct {
-    // implement me
-    web.GRPCService
-}
-
-// implement me.
-func newService() web.GRPCService {
-    return new(service)
-}
-
-func main() {
-    service1 := newService()
-    service2 := newService()
-    service3 := newService()
-
-    custom := web.NewGRPCServer(
-        web.WithGRPCName("custom"),
-        web.WithGRPCService(service1),
-        web.WithGRPCService(service2),
-        web.WithGRPCService(service3),
-        web.WithGRPCConfig(web.GRPCConfig{
-            Enabled: true,
-			Reflect: true, // enables reflection service
-            Address: ":9090",
-            Network: "tcp",
-        }))
-
-    _ = custom
-
-    // ...
-}
 ```
 
-## Tracing component
+Important behavior:
 
-You can find more information about tracing conventions in public
-[documentation](https://opentelemetry.io)
+- the package opens the listener once and serves on it directly
+- TLS is derived from `config.BaseHTTP.TLSConfig`
+- graceful shutdown uses `BaseHTTP.ShutdownTimeout` with a safe fallback
+- `WithOpenTelemetry()` extracts incoming trace context and creates server spans
 
-### Preconfigured Jaeger
+## gRPC Service
+
+`network/grpc` owns the lifecycle of a `grpc.Server` and re-exports the most common gRPC server-side types used for registration and descriptors.
+
+Typical wiring:
 
 ```go
-package main
-
-import (
-    "time"
-
-    "github.com/im-kulikov/go-bones/logger"
-    "github.com/im-kulikov/go-bones/service"
-    "github.com/im-kulikov/go-bones/tracer"
+svc, err := grpc.NewServer(
+	cfg.GRPC,
+	log,
+	grpc.ServiceName("rpc"),
+	grpc.WithOpenTelemetry(),
+	grpc.RegisterServices(func(server *grpc.Server) {
+		healthServer := health.NewServer()
+		healthServer.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
+		healthpb.RegisterHealthServer(server, healthServer)
+	}),
 )
-
-func main() {
-    var err error
-
-    cfg := tracer.Config{
-        Type:    tracer.JaegerType,
-        Enabled: true,
-
-        Jaeger: tracer.Jaeger{
-            Sampler:       1,
-            Service:       "custom-service",
-            Endpoint:      "http://jaeger-endpoint",
-            AgentEndpoint: "jaeger-udp-endpoint:6831",
-            RetryInterval: time.Second * 15,
-        },
-    }
-
-    var trace service.Service
-    if trace, err = tracer.Init(logger.Default(), cfg); err != nil { // ... tracer.Option)
-        logger.Default().Fatalf("could not initialize tracing %v", err)
-    }
-
-    _ = trace
-}
 ```
 
-### gRPC
+Important behavior:
 
-#### Examples for grpc.Conn
+- TLS is derived from `config.BaseGRPC.TLSConfig`
+- graceful shutdown uses `BaseGRPC.ShutdownTimeout` with a safe fallback
+- repeated shutdown calls are serialized internally
+- `WithOpenTelemetry()` installs server-side unary and stream interceptors for trace extraction and span continuation
 
-*Without context*
+## OPS Service
+
+The OPS server is a ready-to-run HTTP service for diagnostics and runtime observability.
 
 ```go
-package main
-
-import (
-    gprom "github.com/grpc-ecosystem/go-grpc-prometheus"
-    "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
-    "google.golang.org/grpc"
-    "google.golang.org/grpc/credentials/insecure"
-
-    "github.com/im-kulikov/go-bones/tracer"
-)
-
-func main() {
-    conn, err := grpc.Dial("localhost:8080",
-        // prometheus and tracing enabling:
-        grpc.WithChainUnaryInterceptor(gprom.UnaryClientInterceptor, otelgrpc.UnaryClientInterceptor()),
-        grpc.WithChainStreamInterceptor(gprom.StreamClientInterceptor, otelgrpc.StreamClientInterceptor()),
-
-        // example of custom client dial options
-        grpc.WithBlock(),
-        grpc.WithTransportCredentials(insecure.NewCredentials()))
-    if err != nil {
-
-    }
-    defer conn.Close()
-
-    // do something with gRPC connection...
-}
+opsSvc, err := http.NewOPSServer(cfg.OpsServer, log)
 ```
 
-*With context*
+By default, it exposes:
+
+- `/metrics`
+- `/debug/pprof`
+- `/debug/vars`
+- `/version` when `version_enabled=true`
+
+It also exposes named pprof profiles under the same base path, for example:
+
+- `/debug/pprof/goroutine`
+- `/debug/pprof/heap`
+- `/debug/pprof/block`
+
+When the process is built with `GOEXPERIMENT=goroutineleakprofile`, Go 1.26 also exposes:
+
+- `/debug/pprof/goroutineleak`
+
+Runtime metrics are exported through the standard Prometheus Go collector with `collectors.MetricsAll`, so scheduler, goroutine, GC, memory, and other Go 1.26 runtime metric groups are available.
+
+`OPS` metrics and OpenTelemetry metrics are intentionally separate telemetry paths. Applications may use either one or both.
+
+## OpenTelemetry
+
+`tracer.Init(log, cfg.Tracer)` installs process-wide OpenTelemetry state and returns a lifecycle-managed service.
 
 ```go
-package main
-
-import (
-    "context"
-
-    gprom "github.com/grpc-ecosystem/go-grpc-prometheus"
-    "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
-    "google.golang.org/grpc"
-    "google.golang.org/grpc/credentials/insecure"
-
-    "github.com/im-kulikov/go-bones/tracer"
-)
-
-func main() {
-    ctx, cancel := context.WithCancel(context.TODO())
-    defer cancel()
-
-    conn, err := grpc.DialContext(ctx, "localhost:8080",
-        // prometheus and tracing enabling:
-        grpc.WithChainUnaryInterceptor(gprom.UnaryClientInterceptor, otelgrpc.UnaryClientInterceptor()),
-        grpc.WithChainStreamInterceptor(gprom.StreamClientInterceptor, otelgrpc.StreamClientInterceptor()),
-
-        // example of custom client dial options
-        grpc.WithBlock(),
-        grpc.WithTransportCredentials(insecure.NewCredentials()))
-    if err != nil {
-
-    }
-    defer conn.Close()
-
-    // do something with gRPC connection...
-}
+telemetry := tracer.Init(log, cfg.Tracer)
 ```
 
-#### Examples for grpc.Server
+What it configures:
 
-```go
-package main
+- resource attributes
+- text-map propagator
+- `TracerProvider`
+- optional `MeterProvider`
+- optional OTel `LoggerProvider`
 
-import (
-    "context"
-    "net"
-    "time"
+Configuration policy:
 
-    gprom "github.com/grpc-ecosystem/go-grpc-prometheus"
-    "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
-    "google.golang.org/grpc"
-    "google.golang.org/grpc/keepalive"
+- standard `OTEL_*` environment variables are the primary contract
+- `config.TracerConfig` acts as a repository-local fallback layer
+- `Endpoint`, `Insecure`, and `UseHTTP` are only used when the corresponding exporter-specific `OTEL_*` variables are not set
 
-    "github.com/im-kulikov/go-bones/tracer"
-)
+Recommended environment examples:
 
-func main() {
-    srv := grpc.NewServer(
-        // prometheus and tracing enabling:
-        grpc.ChainUnaryInterceptor(gprom.UnaryServerInterceptor, otelgrpc.UnaryServerInterceptor()),
-        grpc.ChainStreamInterceptor(gprom.StreamServerInterceptor, otelgrpc.StreamServerInterceptor()),
-
-        // for example of custom server options
-        grpc.KeepaliveParams(keepalive.ServerParameters{
-            Timeout: time.Second * 30,
-        }))
-
-    ctx, cancel := context.WithCancel(context.TODO())
-    defer cancel()
-
-    lis, err := new(net.ListenConfig).Listen(ctx, "tcp", ":8080")
-    if err != nil {
-        panic(err)
-    }
-
-    if err = srv.Serve(lis); err != nil {
-        panic(err)
-    }
-}
+```bash
+export OTEL_ENABLED=true
+export OTEL_SEND_LOGS=true
+export OTEL_SEND_METRICS=true
+export OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4318
+export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+export OTEL_EXPORTER_OTLP_INSECURE=true
 ```
 
-### HTTP
+Repository-specific fallback config also works:
 
-#### Examples for http.Client
-
-```go
-package main
-
-import (
-    "context"
-    "net/http"
-
-    "github.com/im-kulikov/go-bones/tracer"
-    "github.com/im-kulikov/go-bones/web"
-)
-
-func main() {
-    cli := http.DefaultClient
-    web.ApplyTracingToHTTPClient(cli)
-
-    ctx, cancel := context.WithCancel(context.TODO())
-    defer cancel()
-
-    req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://google.com", nil)
-    if err != nil {
-        panic(err)
-    }
-
-    if _, err = cli.Do(req); err != nil {
-        panic(err)
-    }
-}
+```yaml
+tracer:
+  enabled: true
+  send_logs: true
+  send_metrics: true
+  use_http: true
+  endpoint: "otel-collector:4318"
+  insecure: true
 ```
 
-#### Examples for http.Server
+To get end-to-end request correlation:
 
-```go
-package main
+1. Initialize logger with `logger.Init(cfg.Logger)`.
+2. Initialize telemetry with `tracer.Init(log, cfg.Tracer)`.
+3. Enable transport instrumentation with:
+   - `network/http.WithOpenTelemetry()`
+   - `network/grpc.WithOpenTelemetry()`
+4. Enable log bridging with `logger.open_tracing: true`.
 
-import (
-    "net/http"
-    "net/http/pprof"
+After that:
 
-    "github.com/im-kulikov/go-bones/web"
-)
+- HTTP and gRPC transports continue incoming trace context
+- logs emitted inside request/RPC contexts include `trace_id` and `span_id`
+- traces, logs, and metrics can be exported through OTLP
 
-func main() {
-    mux := http.NewServeMux()
-    // with http.Handler
-    mux.Handle("/heap", web.HTTPTracingMiddleware(pprof.Handler("heap")))
+## Make Targets
 
-    // with http.HandlerFunc
-    mux.Handle("/test", web.HTTPTracingMiddlewareFunc(func(w http.ResponseWriter, r *http.Request) {
-        w.WriteHeader(http.StatusOK)
-    }))
-
-    if err := http.ListenAndServe(":8080", mux); err != nil {
-        panic(err)
-    }
-}
-```
+| Command              | Description                         |
+|----------------------|-------------------------------------|
+| `make help`          | Show available targets              |
+| `make deps`          | Ensure dependencies are available   |
+| `make lint`          | Run `golangci-lint`                 |
+| `make vet`           | Run `go vet ./...`                  |
+| `make test`          | Run tests                           |
+| `make install-tools` | Install development tools           |

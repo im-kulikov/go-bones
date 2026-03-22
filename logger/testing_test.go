@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 type stubTB struct {
@@ -34,4 +35,12 @@ func Test_ForTest(t *testing.T) {
 
 	log := ForTests(TestLoggerWriteToTB(tb))
 	log.Info("hello world")
+}
+
+func Test_syncBuffer(t *testing.T) {
+	buf := NewSyncBuffer()
+	log := ForTests(TestLoggerWriter(buf))
+	log.InfoContext(t.Context(), "some message")
+	require.Contains(t, buf.String(), "some message")
+	require.Contains(t, string(buf.Bytes()), "some message")
 }

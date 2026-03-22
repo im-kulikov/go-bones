@@ -2,94 +2,163 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"slices"
-	"sync"
+	"sync/atomic"
 
 	"github.com/im-kulikov/go-bones"
+	"github.com/im-kulikov/go-bones/logger"
 )
 
-// launcher implements a background process that runs a specified Launcher function
-// and supports graceful shutdown once started.
+var (
+	// ErrEmptyLauncher reports that NewLauncher received a nil Launcher callback.
+	ErrEmptyLauncher = bones.Error("empty launcher")
+	// ErrStopsLauncher reports that Start was called after Stop had already begun.
+	// Launcher is intentionally single-run, so a stopped instance is terminal.
+	ErrStopsLauncher = bones.Error("start stopped launcher")
+)
+
+// Launcher is the user-supplied function executed by launcher.Start.
+// It receives a child context canceled from Stop or by the parent context.
+type Launcher func(context.Context) error
+
+// The launcher adapts a single long-running function to the Service interface.
+//
+// The type intentionally models a one-shot lifecycle:
+//   - Start may execute the callback only once.
+//   - Stop is best-effort and idempotent.
+//   - The callback result is stored and returned to every waiter after completion.
+//
+// This contract reflects the current service orchestration model in this repository:
+// services are constructed once, started once, and then shut down permanently.
 type launcher struct {
 	name string
 	call Launcher
-	done chan struct{} // Signals when the launcher has fully stopped.
-	wait chan struct{} // Ensures the launcher has started before stopping.
-	once *sync.Once
-	stop context.CancelCauseFunc
+	done chan struct{}
+	logs *logger.Logger
+	hook []func(context.Context)
 
-	onShutdown []func(context.Context)
+	init atomic.Bool
+	halt atomic.Bool
+
+	errors atomic.Pointer[error]
+	cancel atomic.Pointer[context.CancelFunc]
 }
 
-// Launcher is a function executed by the launcher, usually containing the main logic
-// to be run in the background until the context is canceled or the function returns.
-type Launcher func(context.Context) error
+// LauncherOption configures launcher runtime behaviour.
+type LauncherOption func(*launcher)
 
-// ErrEmptyLauncher is returned if the launcher function is nil or empty.
-const ErrEmptyLauncher bones.Error = "empty launcher function"
-
-// NewLauncher creates and returns a new Service that runs the provided Launcher function.
-// If the function is nil, any further call to Start returns ErrEmptyLauncher.
-// The optional onShutdown callbacks are invoked when Stop completes.
-func NewLauncher(name string, call Launcher, onShutdown ...func(context.Context)) Service {
-	return &launcher{
-		name: name,
-		call: call,
-		stop: func(error) {},
-		once: new(sync.Once),
-		done: make(chan struct{}),
-		wait: make(chan struct{}),
-
-		onShutdown: slices.DeleteFunc(onShutdown, func(handle func(context.Context)) bool {
-			return handle == nil
-		}),
+// WithLauncherLogger overrides the logger used for launcher lifecycle messages.
+// Nil is ignored so callers can pass optional logger dependencies safely.
+func WithLauncherLogger(log *logger.Logger) LauncherOption {
+	return func(l *launcher) {
+		if log != nil {
+			l.logs = log
+		}
 	}
 }
 
-// Name returns the name of the launcher, implementing the Service interface.
-func (w *launcher) Name() string {
-	return w.name
+// WithLauncherShutdownHooks registers callbacks that run after Stop finishes waiting.
+// Nil callbacks are discarded to keep shutdown paths panic-free for optional hooks.
+func WithLauncherShutdownHooks(hook ...func(context.Context)) LauncherOption {
+	return func(l *launcher) {
+		l.hook = append(l.hook, slices.DeleteFunc(hook, func(h func(context.Context)) bool {
+			return h == nil
+		})...)
+	}
 }
 
-// Start runs the launcher function in a separate goroutine. If the launcher function is nil,
-// it returns ErrEmptyLauncher. Once the context is canceled, the launcher terminates.
-func (w *launcher) Start(ctx context.Context) error {
-	defer w.once.Do(func() { close(w.done) })
+func (l *launcher) apply(options ...LauncherOption) *launcher {
+	for _, option := range options {
+		option(l)
+	}
 
-	if w.call == nil {
-		close(w.wait)
+	return l
+}
+
+// NewLauncher creates a Service wrapper for a single background callback.
+//
+// The returned service has a strict lifecycle:
+//   - Start runs the callback once and remembers its result.
+//   - Stop cancels the callback context, waits for completion or shutdown timeout,
+//     and then executes shutdown hooks once.
+//   - Further Start calls fail once the instance has already started or begun stopping.
+func NewLauncher(name string, call Launcher, options ...LauncherOption) Service {
+	return (&launcher{
+		name: name,
+		call: call,
+		logs: logger.Default(),
+		done: make(chan struct{}),
+	}).apply(options...)
+}
+
+// Name returns the service name used in orchestration and lifecycle logs.
+func (l *launcher) Name() string {
+	return l.name
+}
+
+// Start executes the launcher callback exactly once.
+//
+// Start first validates the callback and parent context, then atomically claims the
+// launcher run. The callback receives a derived cancelable context, and its returned
+// error is stored, so callers waiting on the same run observe a consistent result.
+// If Stop has already begun, Start returns ErrStopsLauncher immediately because the
+// instance has already entered its terminal shutdown state.
+//
+// Why it works this way:
+//   - The launcher used to have more ambiguous restart semantics.
+//   - The current implementation makes the one-shot contract explicit.
+//   - Persisting the callback result prevents races where later waiters would lose
+//     the original startup/shutdown error.
+func (l *launcher) Start(top context.Context) error {
+	if l.call == nil {
 		return ErrEmptyLauncher
 	}
 
-	var grace context.Context
-	grace, w.stop = context.WithCancelCause(ctx)
-
-	if grace.Err() != nil {
-		close(w.wait)
-		return context.Cause(grace)
+	if err := top.Err(); err != nil {
+		return err
 	}
 
-	close(w.wait)
-	return w.call(grace)
+	if called := l.halt.Load(); called {
+		return ErrStopsLauncher
+	}
+
+	if !l.init.Swap(true) {
+		ctx, cancel := context.WithCancel(top)
+		l.cancel.Store(&cancel)
+		l.errors.Store(new(l.call(ctx)))
+		close(l.done)
+	}
+
+	<-l.done
+	err := l.errors.Load()
+
+	return *err
 }
 
-// Stop gracefully shuts down the launcher, waiting for it to exit. If the launcher
-// has not started yet, it blocks until Start is called before proceeding.
-// After the launcher stops, any onShutdown callbacks are invoked.
-func (w *launcher) Stop(ctx context.Context) {
-	select {
-	case <-ctx.Done():
-		w.stop(fmt.Errorf("launcher %q stopped: %w", w.name, context.Cause(ctx)))
-	case <-w.wait: // Ensure the launcher has started before stopping.
+// Stop begins graceful shutdown for a started launcher.
+//
+// Stop is intentionally a no-op before Start, which avoids waiting on a launcher
+// that never claimed resources. Once shutdown begins, Stop cancels the callback
+// context, waits for the callback to exit or for ctx to expire, and finally runs
+// registered shutdown hooks once. The `halt` flag also blocks any later Start call,
+// making Stop the terminal transition for the launcher lifecycle.
+func (l *launcher) Stop(ctx context.Context) {
+	if called := l.init.Load(); !called {
+		return
 	}
 
-	select { // Wait until the launcher stops or the context deadline expires.
-	case <-w.done:
-	case <-ctx.Done():
-	}
+	if !l.halt.Swap(true) {
+		if cancel := l.cancel.Load(); cancel != nil {
+			(*cancel)()
+		}
 
-	for _, call := range w.onShutdown {
-		call(ctx)
+		select {
+		case <-l.done:
+		case <-ctx.Done():
+		}
+
+		for _, h := range l.hook {
+			h(ctx)
+		}
 	}
 }

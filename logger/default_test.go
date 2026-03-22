@@ -32,6 +32,8 @@ func Test_default(t *testing.T) {
 	var cfg config.Logger
 	require.NoError(t, config.Load(&cfg))
 
+	require.NotEmpty(t, Default())
+
 	cfg.AddAppInfo = true
 	cfg.Secrets = append(cfg.Secrets, slog.TimeKey)
 	cfg.SetAppNameAndVersion("test-app-name", "test-app-version")

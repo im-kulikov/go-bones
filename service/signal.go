@@ -12,10 +12,10 @@ import (
 
 type handler func()
 
-// ErrCancelCalled fires when context.CancelCauseFunc is called.
+// ErrCancelCalled is returned when context.CancelCauseFunc is explicitly called.
 const ErrCancelCalled = bones.Error("cancel called")
 
-// ErrOsSignal fires when os.Signal received.
+// ErrOsSignal is returned when an OS signal is received by the signal handler.
 const ErrOsSignal = bones.Error("received signal")
 
 // SignalContext creates a context which canceled when one of the specified signals is received.
@@ -29,7 +29,7 @@ func SignalContext(
 	return ctx, func() { cancel(ErrCancelCalled) }
 }
 
-// ErrReceivedSignal is a custom error for received OS signals.
+// ErrReceivedSignal wraps ErrOsSignal with the specific signal that was received.
 func ErrReceivedSignal(sig os.Signal) error {
 	return fmt.Errorf("%w: %v", ErrOsSignal, sig)
 }

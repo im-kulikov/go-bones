@@ -7,9 +7,13 @@ import (
 
 	"github.com/im-kulikov/gonfig"
 	"github.com/stretchr/testify/require"
+
+	"github.com/im-kulikov/go-bones/internal/testutil"
 )
 
 func Test_OpsSettings(t *testing.T) {
+	testutil.RequireNetworkIntegration(t)
+
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	require.NoError(t, lis.Close())

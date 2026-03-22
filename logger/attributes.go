@@ -1,5 +1,3 @@
-// Package logger provides a convenient wrapper around slog with type aliases and helper functions
-// for structured logging.
 package logger
 
 import (

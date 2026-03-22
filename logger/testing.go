@@ -2,6 +2,7 @@ package logger
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"log/slog"
 	"sync"
@@ -14,7 +15,6 @@ import (
 // It holds a list of secret fields to redact from log records and can write to multiple destinations.
 type testLogWriter struct {
 	io.Writer
-	sync.Mutex
 
 	secrets []string
 }
@@ -25,29 +25,93 @@ type tbWriter struct {
 	sync.Mutex
 }
 
+// syncWriter is a concurrency-safe wrapper around an io.Writer that uses a mutex to synchronize write operations.
+type syncWriter struct {
+	io.Writer
+	sync.Mutex
+}
+
 // TestLoggerOption defines a functional option for configuring testing log behavior.
 type TestLoggerOption func(*testLogWriter)
 
-// Write writes log data to the provided testing.TB, trimming trailing whitespace.
+// syncBytesBuffer is a thread-safe implementation of bytes.Buffer using a sync.Mutex
+// for concurrent access control.
+type syncBytesBuffer struct {
+	sync.Mutex
+	bytes.Buffer
+}
+
+// SyncBuffer is an interface for a thread-safe buffer that supports writing,
+// string conversion, and byte slice retrieval.
+type SyncBuffer interface {
+	io.Writer
+	fmt.Stringer
+	Bytes() []byte
+}
+
+// Write writes the provided byte slice to the buffer in a thread-safe manner
+// and returns the number of bytes written and an error.
+func (s *syncBytesBuffer) Write(data []byte) (int, error) {
+	s.Lock()
+	defer s.Unlock()
+
+	return s.Buffer.Write(data)
+}
+
+// String returns the contents of the buffer as a string in a thread-safe manner.
+func (s *syncBytesBuffer) String() string {
+	s.Lock()
+	defer s.Unlock()
+
+	return s.Buffer.String()
+}
+
+// Bytes return a copy of the unread portion of the buffer's data in a thread-safe manner.
+func (s *syncBytesBuffer) Bytes() []byte {
+	s.Lock()
+	defer s.Unlock()
+
+	buf := s.Buffer.Bytes()
+	out := make([]byte, len(buf))
+	copy(out, buf)
+
+	return out
+}
+
+// NewSyncBuffer creates a new instance of a thread-safe SyncBuffer backed
+// by a syncBytesBuffer.
+func NewSyncBuffer() SyncBuffer {
+	return new(syncBytesBuffer)
+}
+
+// NewSyncWriter wraps an io.Writer with a mutex to ensure safe concurrent access
+// and returns the concurrency-safe writer.
+func NewSyncWriter(rw io.Writer) io.Writer {
+	return new(syncWriter{Writer: rw})
+}
+
+// Write writes log data to the provided testing.TB output stream.
 //
 // This method satisfies the io.Writer interface.
 func (t *tbWriter) Write(data []byte) (int, error) {
 	t.Lock()
 	defer t.Unlock()
 
+	t.Helper()
+
 	select {
 	case <-t.Context().Done():
 		return len(data), nil
 	default:
-		t.Log(string(bytes.TrimSpace(data)))
-		return len(data), nil
+		_, err := t.Output().Write(data)
+		return len(data), err
 	}
 }
 
 // Write safely writes log data to the underlying writer, ensuring concurrency safety.
 //
 // This method satisfies the io.Writer interface.
-func (t *testLogWriter) Write(data []byte) (int, error) {
+func (t *syncWriter) Write(data []byte) (int, error) {
 	t.Lock()
 	defer t.Unlock()
 
@@ -62,7 +126,7 @@ func (t *testLogWriter) Write(data []byte) (int, error) {
 // Returns:
 //   - A TestLoggerOption that appends the given writer to the log output.
 func TestLoggerWriter(out io.Writer) TestLoggerOption {
-	return func(l *testLogWriter) { l.Writer = io.MultiWriter(l.Writer, out) }
+	return func(l *testLogWriter) { l.Writer = NewSyncWriter(io.MultiWriter(l.Writer, out)) }
 }
 
 // TestLoggerWriteToTB configures the test logger to write messages into the provided testing.TB.
@@ -73,7 +137,7 @@ func TestLoggerWriter(out io.Writer) TestLoggerOption {
 // Returns:
 //   - A TestLoggerOption that appends the testing.TB output to the log output.
 func TestLoggerWriteToTB(t testing.TB) TestLoggerOption {
-	return func(l *testLogWriter) { l.Writer = io.MultiWriter(l.Writer, &tbWriter{TB: t}) }
+	return func(l *testLogWriter) { l.Writer = NewSyncWriter(io.MultiWriter(l.Writer, &tbWriter{TB: t})) }
 }
 
 // TestLoggerSecrets allows the test logger to redact specified secret fields.
@@ -97,7 +161,10 @@ func TestLoggerSecrets(secrets ...string) TestLoggerOption {
 // Returns:
 //   - A pointer to a Logger preconfigured for use in tests.
 func ForTests(options ...TestLoggerOption) *Logger {
-	writer := &testLogWriter{Writer: io.Discard, secrets: []string{slog.TimeKey, "Time"}}
+	writer := &testLogWriter{
+		Writer:  NewSyncWriter(io.Discard),
+		secrets: []string{slog.TimeKey, "Time"},
+	}
 	for _, option := range options {
 		option(writer)
 	}

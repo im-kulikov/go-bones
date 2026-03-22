@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// BaseGRPC represents the base configuration for a gRPC server, including TLS settings and timeouts.
+// BaseGRPC contains shared gRPC server settings used by network/grpc.
 // nolint:lll
 type BaseGRPC struct {
 	appSettings
@@ -27,10 +27,10 @@ type GRPCConfig interface {
 	Base() BaseGRPC
 }
 
-// Base returns the BaseGRPC instance itself, providing a fluent interface style.
+// Base returns the underlying BaseGRPC value.
 func (c BaseGRPC) Base() BaseGRPC { return c }
 
-// PrepareTLSConfig generates a TLS configuration or returns an error if TLS is not enabled or misconfigured.
+// PrepareTLSConfig builds a tls.Config from BaseGRPC.TLSConfig.
 func (c BaseGRPC) PrepareTLSConfig() (*tls.Config, error) {
 	if c.TLSConfig == nil {
 		return nil, ErrTLSDisabled

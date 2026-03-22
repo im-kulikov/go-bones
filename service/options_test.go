@@ -154,7 +154,7 @@ func TestWithService_Group(t *testing.T) {
 
 	service1 := &mockService{enabled: true}
 	service2 := &mockService{enabled: true}
-	service := NewGroup(service1, service2)
+	service := Compose(service1, service2)
 
 	opt := WithService(service)
 	opt(cfg)
@@ -162,4 +162,21 @@ func TestWithService_Group(t *testing.T) {
 	require.Len(t, cfg.handle, 2)
 	assert.Equal(t, service1, cfg.handle[0])
 	assert.Equal(t, service2, cfg.handle[1])
+}
+
+func TestWithService_GroupAndStandalone(t *testing.T) {
+	log := logger.ForTests()
+	cfg := &settings{logger: log}
+
+	service1 := &mockService{enabled: true, name: "service-1"}
+	service2 := &mockService{enabled: true, name: "service-2"}
+	service3 := &mockService{enabled: true, name: "service-3"}
+
+	opt := WithService(Compose(service1, service2), service3)
+	opt(cfg)
+
+	require.Len(t, cfg.handle, 3, "services after a group should not be dropped")
+	assert.Equal(t, service1, cfg.handle[0])
+	assert.Equal(t, service2, cfg.handle[1])
+	assert.Equal(t, service3, cfg.handle[2])
 }

@@ -26,6 +26,9 @@ func prepareTransformers(cfg config.Logger, transformers ...slogTransformer) []s
 	// Add a transformer to include context metadata in log records.
 	out = append(out, slogTransformerFunc(contextTransformer))
 
+	// Emit records into OTel Logs when the bridge is enabled process-wide.
+	out = append(out, newOpenTelemetryBridge())
+
 	// Add an OpenTracing transformer if tracing is enabled.
 	if cfg.OpenTracingEnabled {
 		out = append(out, slogTransformerFunc(openTracingTransform))

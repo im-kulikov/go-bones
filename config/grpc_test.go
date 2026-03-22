@@ -7,6 +7,8 @@ import (
 
 	"github.com/im-kulikov/gonfig"
 	"github.com/stretchr/testify/require"
+
+	"github.com/im-kulikov/go-bones/internal/testutil"
 )
 
 type TestGRPC struct {
@@ -18,6 +20,8 @@ type TestGRPC struct {
 func (c TestGRPC) Addr() string { return c.Address }
 
 func Test_ExampleGRPCSettings(t *testing.T) {
+	testutil.RequireNetworkIntegration(t)
+
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	require.NoError(t, lis.Close())

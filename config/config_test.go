@@ -85,15 +85,13 @@ func validateConfig(t *testing.T, c testCase, handle func(cfg TestConfig, err er
 	require.NoError(t, fetchError(strings.NewReader(c.body).WriteTo(tmp)))
 	require.NoError(t, tmp.Close())
 
-	customParser := testParser(1)
-
 	var cfg TestConfig
 	err = Load(&cfg,
 		c.opts,
 		WithName("name"),
 		WithVersion("test"),
-		WithParsers(&customParser),
-		WithParserInt(func(c gonfig.Config) (gonfig.Parser, error) {
+		WithParsers(new(testParser(1))),
+		WithParserInit(func(c gonfig.Config) (gonfig.Parser, error) {
 			var p testParser
 
 			return &p, nil
@@ -123,6 +121,9 @@ func Test_config(t *testing.T) {
 
 				require.Equal(t, "name", cfg.Logger.name)
 				require.Equal(t, "test", cfg.Logger.version)
+
+				require.Equal(t, "name", cfg.Tracer.AppName())
+				require.Equal(t, "test", cfg.Tracer.AppVersion())
 
 				require.True(t, cfg.Logger.OpenTracingEnabled)
 				require.Equal(t, []string{"test"}, cfg.Logger.Secrets)

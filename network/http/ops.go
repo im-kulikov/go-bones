@@ -3,14 +3,13 @@ package http
 import (
 	"encoding/json"
 	"expvar"
-	"net/http"
 	"net/http/pprof"
 	"runtime/debug"
-	"runtime/metrics"
-	"slices"
+	rprof "runtime/pprof"
 	"text/template"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/im-kulikov/go-bones/config"
@@ -18,68 +17,16 @@ import (
 	"github.com/im-kulikov/go-bones/service"
 )
 
-// opsCollector implements prometheus.Collector interface for collecting Go runtime metrics.
-// It gathers metrics from the runtime/metrics package and exposes them in Prometheus format.
-type opsCollector struct {
-	desc *prometheus.Desc
-}
-
 const (
 	defaultOPSServiceName = "ops"
-
-	opsCollectorName        = "gm_runtime"
-	opsCollectorDescription = "Raw golang runtime/metrics value"
 )
 
-// newOpsCollector creates and initializes a new opsCollector instance.
-// It sets up a Prometheus metric descriptor with the name "gm_runtime" that will contain
-// raw values from Go runtime metrics.
-func newOpsCollector() *opsCollector {
-	return &opsCollector{
-		desc: prometheus.NewDesc(opsCollectorName, opsCollectorDescription, []string{"name"}, nil),
-	}
-}
-
-// Describe implements prometheus.Collector interface.
-// It sends the collector's metric descriptor to the provided channel.
-// Prometheus calls this method when the collector is registered.
-func (o *opsCollector) Describe(out chan<- *prometheus.Desc) {
-	out <- o.desc
-}
-
-// Collect implements prometheus.Collector interface.
-// It gathers all available runtime metrics that are either uint64 or float64,
-// reads their current values, and sends them as Prometheus metrics through
-// the provided channel. Each metric is labeled with its original name from
-// the runtime/metrics package.
-func (o *opsCollector) Collect(out chan<- prometheus.Metric) {
-	desc := metrics.All()
-	list := make([]metrics.Sample, 0, len(desc))
-	kind := []metrics.ValueKind{
-		metrics.KindUint64,
-		metrics.KindFloat64,
-	}
-
-	for _, item := range desc {
-		if !slices.Contains(kind, item.Kind) {
-			continue
-		}
-
-		list = append(list, metrics.Sample{Name: item.Name})
-	}
-
-	metrics.Read(list)
-
-	for _, sample := range list {
-		var value float64
-		if sample.Value.Kind() == metrics.KindUint64 {
-			value = float64(sample.Value.Uint64())
-		} else if sample.Value.Kind() == metrics.KindFloat64 {
-			value = sample.Value.Float64()
-		}
-
-		out <- prometheus.MustNewConstMetric(o.desc, prometheus.GaugeValue, value, sample.Name)
-	}
+// newOpsRuntimeCollector returns the standard Prometheus Go collector with
+// runtime/metrics groups enabled for scheduler, memory, and GC diagnostics.
+func newOpsRuntimeCollector() prometheus.Collector {
+	return collectors.NewGoCollector(
+		collectors.WithGoCollectorRuntimeMetrics(collectors.MetricsAll),
+	)
 }
 
 // buildInfo contains build information read from the embedded build info.
@@ -153,24 +100,39 @@ BuildInfo is empty
 //
 // Usage: Typically mounted on routes like "/version" or "/debug/version"
 // for health checks, deployment verification, and operational monitoring.
-func version(w http.ResponseWriter, r *http.Request) {
+func version(w ResponseWriter, r *Request) {
 	switch r.URL.Query().Get("format") {
 	case "json":
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(StatusOK)
 		_ = json.NewEncoder(w).Encode(buildInfo)
 	default:
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(StatusOK)
 		_ = versionTpl.Execute(w, buildInfo)
 	}
 }
 
-// NewOPSServer creates a new operations server that provides monitoring and debugging endpoints.
+// registerPprofHandlers wires standard pprof handlers and any named runtime
+// profiles currently exposed by runtime/pprof.
+func registerPprofHandlers(mux *ServeMux, base string) {
+	mux.HandleFunc(base+"/", pprof.Index)
+	mux.HandleFunc(base+"/cmdline", pprof.Cmdline)
+	mux.HandleFunc(base+"/profile", pprof.Profile)
+	mux.HandleFunc(base+"/symbol", pprof.Symbol)
+	mux.HandleFunc(base+"/trace", pprof.Trace)
+
+	for _, profile := range rprof.Profiles() {
+		mux.Handle(base+"/"+profile.Name(), pprof.Handler(profile.Name()))
+	}
+}
+
+// NewOPSServer creates an HTTP service exposing monitoring and debugging endpoints.
 // It sets up the following handlers:
 //   - Prometheus metrics endpoint
 //   - Expvar variables endpoint
-//   - pprof debugging endpoints (index, cmdline, profile, symbol, and trace)
+//   - `pprof` debugging endpoints (index, cmdline, profile, symbol, trace, and
+//     any named runtime profiles such as goroutine, heap, or goroutineleak when available)
 //
 // Parameters:
 //   - cfg: Configuration for the operations server
@@ -178,21 +140,21 @@ func version(w http.ResponseWriter, r *http.Request) {
 //
 // Returns a configured HTTP server as a service.Service interface and any error encountered during setup.
 func NewOPSServer(cfg config.Ops, log *logger.Logger) (service.Service, error) {
-	mux := http.NewServeMux()
+	mux := NewServeMux()
 
-	// prepare metrics handlers
-	prometheus.MustRegister(newOpsCollector())
-	mux.Handle(cfg.MetricsPath, promhttp.Handler())
+	// OPS intentionally serves Prometheus/runtime diagnostics independently of
+	// any OTEL metrics pipeline, so applications can choose one or both paths.
+	register := prometheus.NewRegistry()
+	register.MustRegister(newOpsRuntimeCollector())
+	mux.Handle(cfg.MetricsPath, promhttp.InstrumentMetricHandler(
+		register, promhttp.HandlerFor(register, promhttp.HandlerOpts{}),
+	))
 
 	// prepare exp variables handlers
 	mux.Handle(cfg.ExpVarsPath, expvar.Handler())
 
-	// prepare pprof handler
-	mux.HandleFunc(cfg.ProfilePath+"/", pprof.Index)
-	mux.HandleFunc(cfg.ProfilePath+"/cmdline", pprof.Cmdline)
-	mux.HandleFunc(cfg.ProfilePath+"/profile", pprof.Profile)
-	mux.HandleFunc(cfg.ProfilePath+"/symbol", pprof.Symbol)
-	mux.HandleFunc(cfg.ProfilePath+"/trace", pprof.Trace)
+	// prepare pprof handlers
+	registerPprofHandlers(mux, cfg.ProfilePath)
 
 	// version handler
 	if cfg.VersionEnabled {
@@ -203,7 +165,7 @@ func NewOPSServer(cfg config.Ops, log *logger.Logger) (service.Service, error) {
 		cfg,
 		log,
 		ServiceName(defaultOPSServiceName),
-		ServerOptions(func(srv *http.Server) {
+		ServerOptions(func(srv *Server) {
 			srv.Handler = mux
 		}),
 	)

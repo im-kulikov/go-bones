@@ -91,7 +91,9 @@ func openTracingTransform(ctx context.Context, original slog.Record) slog.Record
 	}
 
 	// Record the event in the active span.
-	span.AddEvent("log", trace.WithAttributes(attrs...))
+	if !openTelemetryBridgeEnabled() {
+		span.AddEvent("log", trace.WithAttributes(attrs...))
+	}
 	if original.Level >= slog.LevelError {
 		span.SetStatus(codes.Error, original.Message)
 	}

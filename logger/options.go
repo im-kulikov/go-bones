@@ -59,7 +59,7 @@ func WithTransformers(transformers ...slogTransformer) Option {
 }
 
 // WithSource returns an Option that enables or disables the inclusion
-// of source file and line information in log entries.
+// of a source file and line information in log entries.
 func WithSource(source bool) Option {
 	return func(o *options) { o.source = source }
 }
@@ -74,8 +74,7 @@ func (o *options) setDefaults() {
 	}
 
 	if o.levels == nil {
-		tmp := slog.LevelInfo
-		o.levels = &tmp
+		o.levels = new(slog.LevelInfo)
 	}
 
 	if o.handler == nil && o.format != nil {

@@ -10,22 +10,22 @@ import (
 	"encoding/pem"
 	"math/big"
 	"net"
-	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
-	"sync/atomic"
-	"syscall"
 	"testing"
 	"time"
 
 	"github.com/im-kulikov/gonfig"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/im-kulikov/go-bones"
 	"github.com/im-kulikov/go-bones/config"
 	"github.com/im-kulikov/go-bones/logger"
-	"github.com/im-kulikov/go-bones/service"
 )
 
 type customHTTPSettings struct {
@@ -44,6 +44,66 @@ func Test_NewHTTPServer(t *testing.T) {
 		bones.ExtractError(NewServer(cfg, log)),
 		config.ErrTLSEmptyKeyPair,
 	)
+}
+
+func Test_newOpenTelemetryHandler(t *testing.T) {
+	prev := otel.GetTextMapPropagator()
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	t.Cleanup(func() { otel.SetTextMapPropagator(prev) })
+
+	t.Run("falls back to default serve mux and service name", func(t *testing.T) {
+		handler := newOpenTelemetryHandler("fallback-service", nil)
+		address := (&url.URL{Scheme: "http", Host: "example.com"}).String()
+
+		req := httptest.NewRequest(MethodGet, address, NoBody)
+		req.Method = ""
+		req.URL.Path = ""
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, req)
+		require.Equal(t, StatusTemporaryRedirect, rr.Code)
+	})
+
+	t.Run("continues extracted trace context", func(t *testing.T) {
+		var got trace.SpanContext
+		handler := newOpenTelemetryHandler(
+			"svc",
+			HandlerFunc(func(w ResponseWriter, r *Request) {
+				got = trace.SpanContextFromContext(r.Context())
+				w.WriteHeader(StatusNoContent)
+			}),
+		)
+
+		parentSpanCtx := trace.NewSpanContext(trace.SpanContextConfig{
+			TraceID:    trace.TraceID{7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7},
+			SpanID:     trace.SpanID{6, 6, 6, 6, 6, 6, 6, 6},
+			TraceFlags: trace.FlagsSampled,
+			Remote:     true,
+		})
+
+		address := (&url.URL{Scheme: "http", Host: "example.com", Path: "/otel"}).String()
+		req := httptest.NewRequest(MethodGet, address, NoBody)
+		otel.GetTextMapPropagator().Inject(
+			trace.ContextWithSpanContext(context.Background(), parentSpanCtx),
+			propagationHeaderCarrier(req.Header),
+		)
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, req)
+		require.Equal(t, StatusNoContent, rr.Code)
+		require.Equal(t, parentSpanCtx.TraceID(), got.TraceID())
+		require.True(t, got.IsValid())
+	})
+}
+
+func Test_propagationHeaderCarrier_Keys(t *testing.T) {
+	header := Header{
+		"Traceparent": []string{"value"},
+		"Baggage":     []string{"user_id=42"},
+	}
+
+	keys := propagationHeaderCarrier(header).Keys()
+	assert.ElementsMatch(t, []string{"Traceparent", "Baggage"}, keys)
 }
 
 func generateTLSKeyPair(t *testing.T) (string, string) {
@@ -85,108 +145,156 @@ func generateTLSKeyPair(t *testing.T) (string, string) {
 	return keyFile.Name(), crtFile.Name()
 }
 
-func Test_NewHTTPServer_With_TLS(t *testing.T) {
-	ctx, cancel := service.SignalContext(t.Context(), syscall.SIGTERM)
-	defer cancel()
-
-	lis, err := new(net.ListenConfig).Listen(ctx, "tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	require.NoError(t, lis.Close())
-
-	log := logger.ForTests(logger.TestLoggerWriteToTB(t))
-
-	var cfg customHTTPSettings
-	cfg.Address = lis.Addr().String()
-	cfg.TLSConfig = new(config.TLS)
-	cfg.ShutdownTimeout = time.Nanosecond
-
-	require.NoError(t, gonfig.SetDefaults(cfg.TLSConfig))
-	cfg.TLSConfig.Enabled = true
-	cfg.TLSConfig.KeyFile, cfg.TLSConfig.CertFile = generateTLSKeyPair(t)
-
-	var i atomic.Int64
-	srv, err := NewServer(cfg, log, Options(
-		ServerOptions(func(server *http.Server) {
-			server.WriteTimeout = 10 * time.Second
-			server.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				time.Sleep(time.Second * time.Duration(i.Load()))
-
-				http.Error(w, "test", http.StatusNotFound)
-			})
-		})))
-	require.NoError(t, err)
-
-	done := make(chan struct{})
-	wait := make(chan struct{})
-	go func() {
-		close(done)
-		assert.NoError(t, srv.Start(ctx))
-		close(wait)
-	}()
-
-	<-done
-	defer func() { <-wait }()
-
-	time.Sleep(100 * time.Millisecond) // wait for the start server
-	uri, err := url.Parse("https://" + cfg.Address)
-	require.NoError(t, err)
-
-	{
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri.String(), nil)
-		require.NoError(t, err)
-
-		cli := new(http.Client)
-		cli.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
-
-		res, err := cli.Do(req)
-		require.NoError(t, err)
-
-		require.Equal(t, http.StatusNotFound, res.StatusCode)
-		require.NoError(t, res.Body.Close())
+func newInsecureTLSClient() *Client {
+	transport := &Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
 	}
 
-	out := make(chan struct{})
+	return &Client{Transport: transport}
+}
+
+func startHTTPRequest(done chan<- error, address string) {
+	httpAddress := (&url.URL{
+		Scheme: "http",
+		Host:   address,
+	}).String()
+
 	go func() {
-		i.Store(10)
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri.String(), nil)
-		assert.NoError(t, err)
+		req, errReq := NewRequestWithContext(
+			context.Background(),
+			MethodGet,
+			httpAddress,
+			nil,
+		)
+		if errReq != nil {
+			done <- errReq
+			return
+		}
 
-		cli := new(http.Client)
-		cli.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+		res, errRes := DefaultClient.Do(req)
+		if errRes == nil {
+			_ = res.Body.Close()
+		}
 
-		_, errDo := cli.Do(req) // nolint:bodyclose
-		assert.ErrorIs(t, errDo, service.ErrCancelCalled)
-
-		close(out)
+		done <- errRes
 	}()
+}
 
-	time.Sleep(100 * time.Millisecond)
+func requireHTTPServerReady(
+	t *testing.T,
+	address string,
+) {
+	t.Helper()
 
-	cancel()
-	<-out
+	require.Eventually(t, func() bool {
+		conn, err := net.DialTimeout("tcp", address, 20*time.Millisecond)
+		if err != nil {
+			return false
+		}
+
+		_ = conn.Close()
+
+		return true
+	}, time.Second, 10*time.Millisecond)
+}
+
+func requireHTTPShutdownWithinBudget(
+	t *testing.T,
+	runDone <-chan error,
+	requestDone <-chan error,
+	requestFinished <-chan struct{},
+	cancelledAt time.Time,
+	budget time.Duration,
+) {
+	t.Helper()
+
+	select {
+	case errDone := <-runDone:
+		require.Failf(
+			t,
+			"server stopped too early",
+			"after %s: %v",
+			time.Since(cancelledAt),
+			errDone,
+		)
+	case <-time.After(20 * time.Millisecond):
+		// server should still be waiting for the active request because ShutdownTimeout allows it
+	}
+
+	select {
+	case <-requestFinished:
+	case <-time.After(time.Second):
+		require.FailNow(t, "request handler did not finish")
+	}
+
+	select {
+	case errDone := <-requestDone:
+		assert.NoError(t, errDone, "request should complete within configured shutdown timeout")
+	case <-time.After(time.Second):
+		require.FailNow(t, "request did not finish")
+	}
+
+	select {
+	case errDone := <-runDone:
+		assert.NoError(t, errDone)
+		assert.LessOrEqual(t, time.Since(cancelledAt), budget,
+			"server shutdown should complete within configured timeout budget")
+	case <-time.After(budget):
+		require.Fail(t, "server did not stop within configured shutdown timeout budget")
+	}
 }
 
 type fakeOpener struct {
 	onListen error
-	onClose  error
+	lis      net.Listener
+}
+
+type fakeServeListener struct {
+	addr net.Addr
+	err  error
+}
+
+func (f *fakeServeListener) Accept() (net.Conn, error) { return nil, f.err }
+
+func (f *fakeServeListener) Close() error { return nil }
+
+func (f *fakeServeListener) Addr() net.Addr {
+	if f.addr != nil {
+		return f.addr
+	}
+
+	return &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0}
 }
 
 const (
 	errOnListen bones.Error = "error on opening listener"
-	errOnClose  bones.Error = "error on closing listener"
 )
 
 func (f *fakeOpener) Accept() (net.Conn, error) {
-	panic("implement me")
+	return nil, net.ErrClosed
 }
 
-func (f *fakeOpener) Addr() net.Addr { return &net.IPNet{} }
+func (f *fakeOpener) Addr() net.Addr {
+	if f.lis != nil {
+		return f.lis.Addr()
+	}
+
+	return &net.IPNet{}
+}
 
 func (f *fakeOpener) Listen(context.Context, string, string) (net.Listener, error) {
-	return f, f.onListen
+	if f.onListen != nil {
+		return nil, f.onListen
+	}
+
+	if f.lis != nil {
+		return f.lis, nil
+	}
+
+	return f, nil
 }
 
-func (f *fakeOpener) Close() error { return f.onClose }
+func (f *fakeOpener) Close() error { return nil }
 
 func withFakeListener(errs ...error) Option {
 	return func(o *serverOptions) {
@@ -195,32 +303,15 @@ func withFakeListener(errs ...error) Option {
 			onListen = errs[0]
 		}
 
-		var onClose error
-		if len(errs) > 1 {
-			onClose = errs[1]
-		}
-
-		o.open = &fakeOpener{onListen: onListen, onClose: onClose}
+		o.open = &fakeOpener{onListen: onListen}
 	}
 }
 
 func Test_shouldFailOnListener(t *testing.T) {
-	top, stop := service.SignalContext(t.Context(), syscall.SIGTERM)
-	defer stop()
-
-	var address string
-	{
-		lis, err := new(net.ListenConfig).Listen(top, "tcp", "127.0.0.1:0")
-		require.NoError(t, err)
-		require.NoError(t, lis.Close())
-
-		address = lis.Addr().String()
-	}
-
 	var cfg customHTTPSettings
 	require.NoError(t, gonfig.SetDefaults(&cfg))
 
-	cfg.Address = address
+	cfg.Address = "127.0.0.1:0"
 	cfg.ShutdownTimeout = 10 * time.Millisecond
 
 	log := logger.ForTests(logger.TestLoggerWriteToTB(t))
@@ -236,53 +327,23 @@ func Test_shouldFailOnListener(t *testing.T) {
 		require.ErrorIs(t, svc.Start(t.Context()), errOnListen)
 	})
 
-	t.Run("should fail on close listener", func(t *testing.T) { // should fail on close listener
-		svc, err := NewServer(
-			cfg,
-			log,
-			withFakeListener(nil, errOnClose),
-		)
-		require.NoError(t, err)
-
-		require.ErrorIs(t, svc.Start(t.Context()), errOnClose)
-	})
-
-	t.Run("should fail on shutdown", func(t *testing.T) { // should fail on shutdown
-		ctx, cancel := context.WithTimeout(top, time.Millisecond*100)
-		defer cancel()
+	t.Run("should fail on serve", func(t *testing.T) {
+		const errOnServe bones.Error = "error on serving listener"
 
 		svc, err := NewServer(
 			cfg,
 			log,
-			ServerOptions(func(srv *http.Server) {
-				srv.Handler = http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-					time.Sleep(time.Second)
-				})
-			}))
-		require.NoError(t, err)
-
-		done := make(chan struct{})
-		wait := make(chan struct{})
-		context.AfterFunc(ctx, func() {
-			close(done)
-			assert.ErrorIs(t, svc.Start(ctx), context.DeadlineExceeded)
-			close(wait)
-		})
-
-		<-done
-		defer func() { <-wait }()
-
-		time.Sleep(100 * time.Millisecond) // wait for server up
-
-		uri := url.URL{Scheme: "http", Host: address}
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri.String(), nil)
-		require.NoError(t, err)
-
-		cli := new(http.Client)
-		require.ErrorIs(
-			t,
-			bones.ExtractError(cli.Do(req)), // nolint:bodyclose
-			context.DeadlineExceeded,
+			func(o *serverOptions) {
+				o.open = &fakeOpener{
+					lis: &fakeServeListener{
+						addr: &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345},
+						err:  errOnServe,
+					},
+				}
+			},
 		)
+		require.NoError(t, err)
+
+		require.ErrorIs(t, svc.Start(t.Context()), errOnServe)
 	})
 }

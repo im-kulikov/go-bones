@@ -5,6 +5,7 @@ import (
 	"time"
 )
 
+// BaseHTTP contains shared HTTP server settings used by transports in this repository.
 // nolint:lll
 type BaseHTTP struct {
 	appSettings
@@ -31,19 +32,19 @@ type Ops struct {
 	VersionEnabled bool   `yaml:"version_enabled" env:"VERSION_ENABLED" toml:"version_enabled" json:"version_enabled" default:"false"`
 }
 
-// HTTPConfig an interface for http settings.
+// HTTPConfig provides the address and base server settings required by network/http.
 type HTTPConfig interface {
 	Addr() string
 	Base() BaseHTTP
 }
 
-// Base settings for http.Server.
+// Base returns the underlying BaseHTTP value.
 func (c BaseHTTP) Base() BaseHTTP { return c }
 
-// Addr for http.Server.
+// Addr returns the configured listen address.
 func (c Ops) Addr() string { return c.Address }
 
-// PrepareTLSConfig creates tls.Config from settings.
+// PrepareTLSConfig builds a tls.Config from BaseHTTP.TLSConfig.
 func (c BaseHTTP) PrepareTLSConfig() (*tls.Config, error) {
 	if c.TLSConfig == nil {
 		return nil, ErrTLSDisabled
