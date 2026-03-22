@@ -3,9 +3,9 @@ package http
 import (
 	"encoding/json"
 	"expvar"
-	"net/http/pprof"
+	"net/http/pprof" // #nosec G108
 	"runtime/debug"
-	rprof "runtime/pprof"
+	rprof "runtime/pprof" // #nosec G108
 	"text/template"
 
 	"github.com/prometheus/client_golang/prometheus"

@@ -21,7 +21,7 @@ func (t *stubTB) Context() context.Context {
 	}
 
 	ctx, cancel := context.WithCancel(t.TB.Context())
-	defer cancel()
+	t.Cleanup(cancel)
 
 	return ctx
 }
