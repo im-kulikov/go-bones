@@ -19,8 +19,7 @@ func RequireNetworkIntegration(t testing.TB) {
 
 	if os.Getenv(codexSandboxEnv) == codexSandboxSeatbelt {
 		t.Skip("network integration test is skipped in the Codex seatbelt sandbox; " +
-			"rerun outside sandbox with escalated permissions, " +
-			"and the agent should ask the user to allow an escalated test run")
+			"rerun it outside the sandbox with escalated permissions")
 	}
 }
 
