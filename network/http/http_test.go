@@ -46,6 +46,25 @@ func Test_NewHTTPServer(t *testing.T) {
 	)
 }
 
+func Test_serve_TLSConfigPresentButDisabled_UsesHTTPBranch(t *testing.T) {
+	buf := logger.NewSyncBuffer()
+	log := logger.ForTests(logger.TestLoggerWriter(buf), logger.TestLoggerWriteToTB(t))
+
+	h := &serverOptions{
+		Logger: log,
+		Server: &Server{},
+		base: config.BaseHTTP{
+			TLSConfig: &config.TLS{Enabled: false},
+		},
+		name: defaultHTTPServiceName,
+	}
+
+	err := h.serve(&fakeServeListener{err: net.ErrClosed})
+	require.ErrorIs(t, err, net.ErrClosed)
+	require.Contains(t, buf.String(), httpServerStarting)
+	require.NotContains(t, buf.String(), httpsServerStarting)
+}
+
 func Test_newOpenTelemetryHandler(t *testing.T) {
 	prev := otel.GetTextMapPropagator()
 	otel.SetTextMapPropagator(propagation.TraceContext{})

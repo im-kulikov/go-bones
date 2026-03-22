@@ -206,7 +206,7 @@ func (c propagationHeaderCarrier) Keys() []string {
 
 // serve starts the HTTP server using the provided listener.
 func (h *serverOptions) serve(lis net.Listener) error {
-	if h.base.TLSConfig == nil {
+	if h.TLSConfig == nil {
 		h.Info(httpServerStarting,
 			logger.String("service", h.name),
 			logger.String("address", lis.Addr().String()))
