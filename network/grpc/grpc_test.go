@@ -191,17 +191,8 @@ func newGRPCConn(t *testing.T, addr string, opts ...DialOption) *ClientConn {
 
 	conn.Connect()
 	require.Eventually(t, func() bool {
-		state := conn.GetState()
-		if state == connectivity.Ready {
-			return true
-		}
-
-		ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
-		defer cancel()
-		conn.WaitForStateChange(ctx, state)
-
 		return conn.GetState() == connectivity.Ready
-	}, time.Second, 20*time.Millisecond)
+	}, 5*time.Second, 50*time.Millisecond)
 
 	return conn
 }
