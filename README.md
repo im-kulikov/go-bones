@@ -272,6 +272,19 @@ type appConfig struct {
 }
 ```
 
+If you prefer the default config-path flags, you can embed `config.DefaultConfigFlag`
+instead of declaring the `Config` field manually. It enables the standard `--config`
+and `-c` flags for your config struct.
+
+```go
+type appConfig struct {
+	config.Base `env:",squash" yaml:",inline"`
+	config.DefaultConfigFlag `env:",squash" yaml:",inline" json:",inline" toml:",inline"`
+
+	HTTP httpConfig `env:"HTTP" yaml:"http"`
+}
+```
+
 Then you can start the service with:
 
 ```bash
