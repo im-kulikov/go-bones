@@ -46,16 +46,27 @@ When in doubt, prefer APIs and examples that are available in Go `1.26` and docu
 ## Golang CI Linter
 
 - Follow the rules in `.golangci.yml`; treat them as the source of truth for formatting and code style.
-- Prefer import layouts that `gci`, `goimports`, and `gofumpt` will keep stable.
+- The active formatter set is `gci`, `gofmt`, `gofumpt`, `goimports`, and `golines`; prefer code that stays stable after all of them run.
+- The active linter set includes `unparam`, `whitespace`, `unconvert`, `bodyclose`, `gocritic`, `godot`, `prealloc`, `rowserrcheck`, `lll`, `cyclop`, `gosec`, `gochecknoglobals`, and `funlen`.
 - Avoid overly long lines; keep code readable without relying on `golines` to reflow it later.
 - Keep functions focused and small enough to avoid `funlen` and `cyclop` violations.
 - Avoid package-level mutable state to satisfy `gochecknoglobals`.
 - Prefer preallocated slices and buffers where the size is known or easy to estimate to satisfy `prealloc`.
 - Close response bodies, readers, and other resources explicitly to satisfy `bodyclose`.
-- Write straightforward, explicit error handling so checks like `errcheck` and `rowserrcheck` stay quiet.
+- Write straightforward, explicit error handling so `rowserrcheck` and similar checks stay quiet.
 - Be careful with unnecessary conversions and redundant code patterns so `unconvert`, `gocritic`, and `whitespace` do not flag the result.
 - Keep security-sensitive code conservative and avoid introducing obvious `gosec` findings.
 - Test files may be exempt from some linter rules, but production code should still follow the same general style.
+
+## Code Review
+
+- When performing a code review, verify the correctness of the code, carefully look for potential issues, and review the changes against best practices.
+- Focus first on correctness, regressions, compatibility, security, and test coverage.
+- Call out concrete bugs, missing edge cases, API breaks, and violations of the repository conventions above.
+- Verify that new code follows the Go version baseline and the `.golangci.yml` rules.
+- Prefer minimal, pragmatic solutions and apply YAGNI, DRY, and KISS.
+- Prefer short, actionable review comments over general style feedback unless the style issue would cause a lint failure or a maintenance problem.
+- If there are no significant findings, say so explicitly and mention any residual risks or testing gaps.
 
 ## Configuration
 
