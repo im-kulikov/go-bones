@@ -43,6 +43,7 @@ func Test_defaultErrorsIgnore(t *testing.T) {
 	}{
 		{name: "default", errs: ErrOsSignal},
 		{name: "signals", errs: fmt.Errorf("%w: %v", ErrOsSignal, os.Interrupt)},
+		{name: "manual cancel", errs: ErrCancelCalled},
 		{name: "context cancel", errs: context.Canceled},
 	}
 
@@ -236,6 +237,54 @@ func TestRunContext_Failure(t *testing.T) {
 	}()
 
 	assert.ErrorIs(t, <-errChan, errStart)
+	mockSvc.AssertExpectations(t)
+}
+
+func TestRunContext_SignalContextCancelIsIgnored(t *testing.T) {
+	log := logger.ForTests()
+	top, cancel := SignalContext(t.Context(), syscall.SIGUSR1)
+	defer cancel()
+
+	mockSvc := new(mockService)
+	mockSvc.name = "testService"
+
+	started := make(chan struct{}, 1)
+	mockSvc.On("Start", mock.Anything).
+		Run(func(args mock.Arguments) {
+			started <- struct{}{}
+			<-args.Get(0).(context.Context).Done()
+		}).
+		Return(nil).
+		Once()
+	mockSvc.On("Stop", mock.Anything).Return().Once()
+
+	options := []Option{
+		func(cfg *settings) {
+			cfg.handle = append(cfg.handle, mockSvc)
+			cfg.shutdown = time.Millisecond * 100
+		},
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- RunContext(top, log, options...)
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("RunContext did not start service")
+	}
+
+	cancel()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("RunContext did not stop after SignalContext cancel")
+	}
+
 	mockSvc.AssertExpectations(t)
 }
 

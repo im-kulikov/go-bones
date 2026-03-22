@@ -37,6 +37,7 @@ var (
 	//nolint:gochecknoglobals
 	defaultIgnoredErrors = []error{
 		ErrOsSignal,
+		ErrCancelCalled,
 		context.Canceled,
 		context.DeadlineExceeded,
 	}
