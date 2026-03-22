@@ -96,6 +96,65 @@ func Test_Workers(t *testing.T) {
 		require.ErrorIs(t, <-runDone, context.Canceled)
 	})
 
+	t.Run("should cancel even if stop races with cancel publication", func(t *testing.T) {
+		wrk := &launcher{
+			name: "simple",
+			done: make(chan struct{}),
+			logs: logger.ForTests(),
+		}
+		wrk.init.Store(true)
+
+		cancelled := make(chan struct{})
+		var cancel context.CancelFunc = func() {
+			close(cancelled)
+			close(wrk.done)
+		}
+
+		go func() {
+			time.Sleep(25 * time.Millisecond)
+			wrk.cancel.Store(&cancel)
+		}()
+
+		stopCtx, stopCancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+		defer stopCancel()
+
+		stopped := make(chan struct{})
+		go func() {
+			wrk.Stop(stopCtx)
+			close(stopped)
+		}()
+
+		select {
+		case <-cancelled:
+		case <-time.After(100 * time.Millisecond):
+			t.Fatal("Stop missed cancel publication")
+		}
+
+		select {
+		case <-stopped:
+		case <-time.After(100 * time.Millisecond):
+			t.Fatal("Stop did not return after cancel")
+		}
+	})
+
+	t.Run(
+		"should return when stop context is already done while cancel is unpublished",
+		func(t *testing.T) {
+			wrk := &launcher{
+				name: "simple",
+				done: make(chan struct{}),
+				logs: logger.ForTests(),
+			}
+			wrk.init.Store(true)
+
+			stopCtx, stopCancel := context.WithCancel(t.Context())
+			stopCancel()
+
+			now := time.Now()
+			require.NotPanics(t, func() { wrk.Stop(stopCtx) })
+			require.Less(t, time.Since(now), 10*time.Millisecond)
+		})
+
 	t.Run("should not run launcher on cancelled context", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), time.Nanosecond)
 		defer cancel()

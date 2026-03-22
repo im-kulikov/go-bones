@@ -80,7 +80,12 @@ func TestRun_Success(t *testing.T) {
 
 	mockSvc := new(mockService)
 	mockSvc.name = "testService"
-	mockSvc.On("Start", mock.Anything).Return(nil).Once()
+	mockSvc.On("Start", mock.Anything).
+		Run(func(args mock.Arguments) {
+			<-args.Get(0).(context.Context).Done()
+		}).
+		Return(nil).
+		Once()
 	mockSvc.On("Stop", mock.Anything).Return().Once()
 
 	options := []Option{
@@ -120,7 +125,12 @@ func TestRunContext_Success(t *testing.T) {
 
 		mockSvc := new(mockService)
 		mockSvc.name = "testService"
-		mockSvc.On("Start", mock.Anything).Return(nil).Once()
+		mockSvc.On("Start", mock.Anything).
+			Run(func(args mock.Arguments) {
+				<-args.Get(0).(context.Context).Done()
+			}).
+			Return(nil).
+			Once()
 		mockSvc.On("Stop", mock.Anything).Return().Once()
 
 		options := []Option{
@@ -141,6 +151,66 @@ func TestRunContext_Success(t *testing.T) {
 		require.NoError(t, <-errChan)
 		mockSvc.AssertExpectations(t)
 	})
+}
+
+func TestRunContext_EmptyServices(t *testing.T) {
+	log := logger.ForTests()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- RunContext(t.Context(), log)
+	}()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("RunContext blocked with no services registered")
+	}
+}
+
+func TestRunContext_ServiceExitCancelsContext(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+	}{
+		{name: "clean exit", err: nil},
+		{name: "ignored exit", err: context.Canceled},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			log := logger.ForTests()
+			top, cancel := context.WithCancel(t.Context())
+			defer cancel()
+
+			mockSvc := new(mockService)
+			mockSvc.name = "testService"
+			mockSvc.On("Start", mock.Anything).Return(tc.err).Once()
+			mockSvc.On("Stop", mock.Anything).Return().Once()
+
+			options := []Option{
+				func(cfg *settings) {
+					cfg.handle = append(cfg.handle, mockSvc)
+					cfg.shutdown = time.Millisecond * 100
+				},
+			}
+
+			done := make(chan error, 1)
+			go func() {
+				done <- RunContext(top, log, options...)
+			}()
+
+			select {
+			case err := <-done:
+				require.NoError(t, err)
+			case <-time.After(time.Second):
+				t.Fatal("RunContext blocked after service exit")
+			}
+
+			mockSvc.AssertExpectations(t)
+		})
+	}
 }
 
 func TestRunContext_Failure(t *testing.T) {

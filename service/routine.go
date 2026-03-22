@@ -103,11 +103,17 @@ func RunContext(top context.Context, log *logger.Logger, options ...Option) erro
 		option(&cfg)
 	}
 
+	if len(cfg.handle) == 0 {
+		return nil
+	}
+
 	ctx, cancel, handleSignals := signalContextRoutine(top, cfg.signal...)
 
 	var wg sync.WaitGroup
 	for _, service := range cfg.handle {
 		wg.Go(func() {
+			defer cancel(nil)
+
 			l.Info("starting service", logger.String("service", service.Name()))
 			err := service.Start(ctx)
 			if err != nil && !containsError(err, cfg.ignore) {

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"runtime"
 	"slices"
 	"sync/atomic"
 
@@ -148,9 +149,16 @@ func (l *launcher) Stop(ctx context.Context) {
 	}
 
 	if !l.halt.Swap(true) {
-		if cancel := l.cancel.Load(); cancel != nil {
-			(*cancel)()
+		var cancel *context.CancelFunc
+		for cancel = l.cancel.Load(); cancel == nil; cancel = l.cancel.Load() {
+			if ctx.Err() != nil {
+				return
+			}
+
+			runtime.Gosched()
 		}
+
+		(*cancel)()
 
 		select {
 		case <-l.done:
