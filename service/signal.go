@@ -45,19 +45,20 @@ func signalContextRoutine(
 	signal.Notify(out, signals...)
 
 	return ctx, cancel, func() {
-		if ctx.Err() != nil {
+		defer signal.Stop(out)
+
+		var err error
+		defer func() { cancel(err) }()
+
+		if err = ctx.Err(); err != nil {
 			return
 		}
 
-		var err error
 		select {
 		case sig := <-out:
 			err = ErrReceivedSignal(sig)
 		case <-ctx.Done():
 			err = errors.Join(context.Canceled, context.Cause(ctx))
 		}
-
-		cancel(err)
-		signal.Stop(out)
 	}
 }
