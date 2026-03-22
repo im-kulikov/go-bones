@@ -96,12 +96,13 @@ func Run(log *logger.Logger, options ...Option) error {
 // Returns:
 //   - error: An error if any of the managed goroutines fail to start or stop properly.
 func RunContext(top context.Context, log *logger.Logger, options ...Option) error {
-	cfg := settings{signal: defaultSignals, ignore: errors.Join(defaultIgnoredErrors...)}
+	l := logger.Named(log, "go-bones", "service")
+
+	cfg := settings{logger: l, signal: defaultSignals, ignore: errors.Join(defaultIgnoredErrors...)}
 	for _, option := range options {
 		option(&cfg)
 	}
 
-	l := logger.Named(log, "go-bones", "service")
 	ctx, cancel, handleSignals := signalContextRoutine(top, cfg.signal...)
 
 	var wg sync.WaitGroup
