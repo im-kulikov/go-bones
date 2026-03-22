@@ -14,19 +14,13 @@ import (
 	"github.com/im-kulikov/go-bones"
 	"github.com/im-kulikov/go-bones/config"
 	"github.com/im-kulikov/go-bones/logger"
+	"github.com/im-kulikov/go-bones/network"
 	"github.com/im-kulikov/go-bones/service"
 )
 
-// ListenOpener defines an interface for creating network listeners.
-// Implementations should handle the creation of network listeners with the specified
-// context, address, and network protocol.
-type ListenOpener interface {
-	Listen(ctx context.Context, address, network string) (net.Listener, error)
-}
-
 type serverOptions struct {
 	name string
-	open ListenOpener
+	open network.ListenOpener
 	base config.BaseHTTP
 	otel bool
 

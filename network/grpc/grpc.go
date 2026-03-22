@@ -16,14 +16,9 @@ import (
 	"github.com/im-kulikov/go-bones"
 	"github.com/im-kulikov/go-bones/config"
 	"github.com/im-kulikov/go-bones/logger"
+	"github.com/im-kulikov/go-bones/network"
 	"github.com/im-kulikov/go-bones/service"
 )
-
-// ListenOpener abstracts listener creation for the gRPC server.
-// It exists mainly to keep listener startup and failure paths testable.
-type ListenOpener interface {
-	Listen(ctx context.Context, address, network string) (net.Listener, error)
-}
 
 // serverOptions contains both construction-time configuration and runtime state for
 // the gRPC transport service built by NewServer.
@@ -35,7 +30,7 @@ type serverOptions struct {
 	name string
 	addr string
 	mu   sync.RWMutex
-	open ListenOpener
+	open network.ListenOpener
 	base config.BaseGRPC
 
 	grpc *Server
