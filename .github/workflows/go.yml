@@ -60,7 +60,7 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          slug: im-kulikov/gonfig
+          slug: im-kulikov/go-bones
           files: coverage.out   # путь к Go coverage
           flags: unittests
           name: codecov-umbrella
