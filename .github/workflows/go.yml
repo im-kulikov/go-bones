@@ -22,9 +22,6 @@ jobs:
       matrix:
         go: [ '1.26' ]
         include:
-          - go: '1.25'
-            run_linter: false
-            run_coverage: false
           - go: '1.26'
             run_linter: true
             run_coverage: true
