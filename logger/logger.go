@@ -1,195 +1,93 @@
 package logger
 
-import (
-	"context"
-	"log"
-	"os"
-	"strings"
+import "github.com/im-kulikov/go-bones/config"
 
-	validation "github.com/go-ozzo/ozzo-validation/v4"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
-	"go.uber.org/zap/zaptest"
-)
+// prepareTransformers initializes a set of record transformers for the logger.
+// It appends transformers for secrets masking and context handling, as well as
+// optional tracing transformations, based on the logger configuration.
+//
+// Parameters:
+//   - cfg: Logger configuration containing options for secrets and tracing.
+//   - transformers: Additional custom slogTransformer implementations.
+//
+// Returns:
+//   - A slice of transformers that will process log records before handling.
+func prepareTransformers(cfg config.Logger, transformers ...slogTransformer) []slogTransformer {
+	var out []slogTransformer
 
-// Config structure that provides configuration of logger module.
-type Config struct {
-	EncodingConsole bool   `env:"ENCODING_CONSOLE" default:"false" usage:"allows to set user-friendly formatting"`
-	Level           string `env:"LEVEL" default:"info" usage:"allows to set custom logger level"`
-	Trace           string `env:"TRACE" default:"fatal" usage:"allows to set custom trace level"`
-	SampleRate      *int   `env:"SAMPLE_RATE" default:"1000" usage:"allows to set sample rate"`
+	// Add a transformer for secret masking if secrets are configured.
+	if len(cfg.Secrets) > 0 {
+		secrets := new(secretTransformer)
+		secrets.apply(cfg.Secrets)
+
+		out = append(out, secrets)
+	}
+
+	// Add a transformer to include context metadata in log records.
+	out = append(out, slogTransformerFunc(contextTransformer))
+
+	// Emit records into OTel Logs when the bridge is enabled process-wide.
+	out = append(out, newOpenTelemetryBridge())
+
+	// Add an OpenTracing transformer if tracing is enabled.
+	if cfg.OpenTracingEnabled {
+		out = append(out, slogTransformerFunc(openTracingTransform))
+	}
+
+	// Add any additional custom transformers provided by the caller.
+	out = append(out, transformers...)
+
+	return out
 }
 
-type testingT interface {
-	Helper()
-	zaptest.TestingT
+// applyHandler decorates the provided `handler` with application metadata.
+// It adds attributes like the application name and version from the logger configuration.
+//
+// Parameters:
+//   - cfg: Logger configuration containing application metadata.
+//   - handler: The underlying slog.Handler to be modified.
+//
+// Returns:
+//   - A new handler with embedded application metadata attributes.
+func applyHandler(cfg config.Logger, handler Handler) Handler {
+	if !cfg.AddAppInfo {
+		return handler
+	}
+
+	values := make([]any, 0, 2)
+
+	// Add the application name to the handler attributes, if provided.
+	if cfg.AppName() != "" {
+		values = append(values, String("name", cfg.AppName()))
+	}
+
+	// Add an application version to the handler attributes, if provided.
+	if cfg.AppVersion() != "" {
+		values = append(values, String("version", cfg.AppVersion()))
+	}
+
+	// If there are attributes to add, create a new handler with them; otherwise, return the original handler.
+	if len(values) > 0 {
+		return handler.WithAttrs([]Attr{Group("app", values...)})
+	}
+
+	return handler
 }
 
-type logger struct {
-	appName    string
-	appVersion string
-
-	colored bool
-
-	config  zap.Config
-	options []zap.Option
-
-	*SugaredLogger
-}
-
-// Validate we should check that passed configuration is valid, so:
-// - trace and level should be empty or valid logger level
-// - sample rate should be empty or greater than zero.
-func (c *Config) Validate(_ context.Context) error {
-	err := validation.ValidateStruct(c,
-		validation.Field(&c.SampleRate, validation.NilOrNotEmpty),
-		validation.Field(&c.Level, validation.Required),
-		validation.Field(&c.Level, validation.Required, validation.In(allLevels...)),
-		validation.Field(&c.Trace, validation.Required),
-		validation.Field(&c.Trace, validation.Required, validation.In(allLevels...)))
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// With allows to provide zap.SugaredLogger as common interface.
-func (l *logger) With(args ...interface{}) Logger {
-	return &logger{
-		config:        l.config,
-		appName:       l.appName,
-		appVersion:    l.appVersion,
-		SugaredLogger: l.SugaredLogger.With(args...),
-	}
-}
-
-// Named allows to set name for zap.SugaredLogger.
-func (l *logger) Named(name string) Logger {
-	return &logger{
-		config:        l.config,
-		appName:       l.appName,
-		appVersion:    l.appVersion,
-		SugaredLogger: l.SugaredLogger.Named(name),
-	}
-}
-
-// Sugar returns zap.SugaredLogger.
-func (l *logger) Sugar() *SugaredLogger { return l.SugaredLogger }
-
-// Std returns standard library log.Logger.
-func (l *logger) Std() *log.Logger { return zap.NewStdLog(l.Desugar()) }
-
-// nolint: gochecknoglobals
-var allLevels = []interface{}{
-	zapcore.InfoLevel.String(),
-	zapcore.DebugLevel.String(),
-	zapcore.WarnLevel.String(),
-	zapcore.ErrorLevel.String(),
-	zapcore.DPanicLevel.String(),
-	zapcore.PanicLevel.String(),
-	zapcore.FatalLevel.String(),
-}
-
-// safeLevel converts string representation into log level.
-func safeLevel(level string) zapcore.Level {
-	switch strings.ToLower(level) {
-	default:
-		return zapcore.InfoLevel
-	case "debug":
-		return zapcore.DebugLevel
-	case "warn":
-		return zapcore.WarnLevel
-	case "error":
-		return zapcore.ErrorLevel
-	case "dpanic":
-		return zapcore.DPanicLevel
-	case "panic":
-		return zapcore.PanicLevel
-	case "fatal":
-		return zapcore.FatalLevel
-	}
-}
-
-// nolint: gochecknoglobals
-var defaultSampleRate = 1000
-
-// Default returns default logger instance.
-func Default() Logger {
-	atom := zap.NewAtomicLevel()
-	atom.SetLevel(zapcore.DebugLevel)
-
-	encoderCfg := zap.NewProductionEncoderConfig()
-
-	encoderCfg.TimeKey = "ts"
-	encoderCfg.EncodeTime = zapcore.ISO8601TimeEncoder
-
-	// Default JSON encoder
-	encoder := zapcore.NewJSONEncoder(encoderCfg)
-
-	l := zap.New(zapcore.NewCore(
-		encoder,
-		zapcore.Lock(os.Stdout),
-		atom),
-		zap.AddCaller(),
-	)
-
-	return &logger{SugaredLogger: l.Sugar()}
-}
-
-// ForTests wrapped logger for tests.
-func ForTests(t testingT) Logger {
-	t.Helper()
-
-	return &logger{SugaredLogger: zaptest.NewLogger(t).Sugar()}
-}
-
-// New prepares logger module.
-func New(cfg Config, opts ...Option) (Logger, error) {
-	var err error
-	logLevel := safeLevel(cfg.Level)
-	logTrace := safeLevel(cfg.Trace)
-
-	var l logger
-	l.config = zap.NewProductionConfig()
-
-	l.config.Level = zap.NewAtomicLevelAt(logLevel)
-
-	l.config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
-
-	if cfg.EncodingConsole {
-		l.config.Encoding = "console"
-	}
-
-	for _, o := range opts {
-		o(&l)
-	}
-
-	if cfg.EncodingConsole && l.colored {
-		l.config.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
-	}
-
-	if cfg.SampleRate == nil {
-		cfg.SampleRate = &defaultSampleRate
-	}
-
-	l.config.Sampling.Initial = *cfg.SampleRate
-	l.config.Sampling.Thereafter = *cfg.SampleRate
-
-	var zapLogger *zap.Logger
-	if zapLogger, err = l.config.Build(zap.AddStacktrace(logTrace)); err != nil {
-		return nil, err
-	}
-
-	if l.appName != "" {
-		zapLogger = zapLogger.With(zap.String("app", l.appName))
-	}
-
-	if l.appVersion != "" {
-		zapLogger = zapLogger.With(zap.String("version", l.appVersion))
-	}
-
-	l.SugaredLogger = zapLogger.Sugar()
-
-	return &l, nil
+// New creates a new logger instance with the configured handler and transformers.
+// It wraps the provided handler with application metadata and prepares the transformers to process records.
+//
+// Parameters:
+//   - cfg: Logger configuration containing attributes and options for logging behavior.
+//   - handler: A slog.Handler instance for processing log records.
+//   - transformers: Optional custom record transformers to apply.
+//
+// Returns:
+//   - A pointer to the configured Logger instance.
+func New(cfg config.Logger, handler Handler, transformers ...slogTransformer) *Logger {
+	return newLogger(&wrappedHandler{
+		conf: cfg,
+		next: applyHandler(cfg, handler),
+		list: prepareTransformers(cfg, transformers...),
+	})
 }

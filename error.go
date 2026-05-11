@@ -1,46 +1,40 @@
 package bones
 
-import (
-	"errors"
-	"fmt"
-)
+// Error allows to define constant errors.
+type Error string
 
-const (
-	// ErrorCodeInternal is an internal error code.
-	ErrorCodeInternal = "internal"
-)
+// Error used to implement error interface.
+func (e Error) Error() string { return string(e) }
 
-var _ = ErrorCode
-
-// Error represents an error within the context of go-bones service.
-type Error struct {
-	// Code is a machine-readable code.
-	Code string `json:"code"`
-	// Message is a human-readable message.
-	Message string `json:"message"`
-	// Inner is a wrapped error that is never shown to API consumers.
-	Inner error `json:"-"`
-}
-
-func (e Error) Error() string {
-	if e.Inner != nil {
-		return fmt.Sprintf("%s %s: %v", e.Code, e.Message, e.Inner)
+// ExtractError extracts the last argument as an error, if it is of type error.
+// It is useful for ignoring return values while still handling errors in functions
+// with multiple return values.
+//
+// If the last argument is not an error or no arguments are passed, it returns nil.
+//
+// Should be used in tests.
+//
+// Example:
+//
+//	require.ErrorIs(t, ExtractError(shouldCatchAnError()), ErrTest)
+//
+//	// example func SomeFunction() (float, error)
+//	if err := ExtractError(SomeFunction()); err != nil {
+//	    log.Println("error occurred:", err)
+//	}
+//
+//	// example func AnotherFunction() (int, string, error)
+//	if err := ExtractError(AnotherFunction()); err != nil {
+//	    log.Println("error occurred:", err)
+//	}
+func ExtractError(args ...any) error {
+	if len(args) == 0 {
+		return nil
 	}
 
-	return fmt.Sprintf("%s %s", e.Code, e.Message)
-}
-
-// Unwrap the error returning the error's reason.
-func (e Error) Unwrap() error {
-	return e.Inner
-}
-
-// ErrorCode returns the code of the error, if available.
-func ErrorCode(err error) string {
-	var e Error
-	if errors.As(err, &e) {
-		return e.Code
+	if err, ok := args[len(args)-1].(error); ok {
+		return err
 	}
 
-	return ""
+	return nil
 }

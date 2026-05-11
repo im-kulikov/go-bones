@@ -1,15 +1,18 @@
 package service
 
 import (
+	"errors"
 	"time"
+
+	"github.com/im-kulikov/go-bones/logger"
 )
 
-// Option allows customizing service module.
-type Option func(*runner)
+// Option configures the service runner built by Run and RunContext.
+type Option func(*settings)
 
-// WithShutdownTimeout allows set shutdown timeout.
+// WithShutdownTimeout overrides the timeout used while stopping registered services.
 func WithShutdownTimeout(v time.Duration) Option {
-	return func(g *runner) {
+	return func(g *settings) {
 		if v == 0 {
 			return
 		}
@@ -18,56 +21,63 @@ func WithShutdownTimeout(v time.Duration) Option {
 	}
 }
 
-// WithLoggerPingPong allows to set ping-pong timer for logger.
+// WithLoggerPingPong registers an internal heartbeat service that logs on the given interval.
 func WithLoggerPingPong(v time.Duration) Option {
-	return func(g *runner) {
+	return func(g *settings) {
 		if v <= 0 {
 			return
 		}
 
-		g.pingPongTimeout = v
-		g.pingPongDisable = false
+		g.logger.Info("ping pong service added")
+		g.append(newPingPong(g.logger, v))
 	}
 }
 
-// WithIgnoreError allows set ignored errors.
+// WithIgnoreError adds an error to the ignore list checked by Run and RunContext.
 func WithIgnoreError(v error) Option {
-	return func(g *runner) {
+	return func(g *settings) {
 		if v == nil {
 			return
 		}
 
-		g.ignore = append(g.ignore, v)
+		g.ignore = errors.Join(g.ignore, v)
 	}
 }
 
-func (g *runner) append(v Service) {
+// append adds a service to the list of managed services,
+// ensuring that disabled services (implementing Enabler) are skipped.
+func (g *settings) append(v Service) {
+	if v == nil {
+		return
+	}
+
 	if svc, ok := v.(Enabler); ok && !svc.Enabled() {
-		g.logger.Warnw("service disabled", "service", v.Name())
+		g.logger.Warn("service disabled", logger.String("service", v.Name()))
 
 		return
 	}
 
-	g.services = append(g.services, v)
+	g.handle = append(g.handle, v)
 }
 
-// WithService allows set Service into Runner.
-func WithService(v Service) Option {
-	return func(g *runner) {
+// WithService registers one or more services with the runner.
+// Composed services are unwrapped so their members are started individually.
+func WithService(v ...Service) Option {
+	return func(g *settings) {
 		if v == nil {
 			return
 		}
 
-		if group, ok := v.(*Group); ok {
-			g.logger.Info("try to add group services")
+		for _, service := range v {
+			if svc, ok := service.(composed); ok {
+				for _, item := range svc {
+					g.append(item)
+				}
 
-			for _, svc := range group.Services() {
-				g.append(svc)
+				continue
 			}
 
-			return
+			g.append(service)
 		}
-
-		g.append(v)
 	}
 }

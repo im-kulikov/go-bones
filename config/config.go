@@ -1,204 +1,105 @@
 package config
 
 import (
-	"context"
-	"errors"
-	"flag"
-	"fmt"
-	"os"
-	"path"
-	"reflect"
-	"strings"
+	"runtime/debug"
 
-	"github.com/cristalhq/aconfig"
-	"github.com/cristalhq/aconfig/aconfigdotenv"
-
-	"github.com/im-kulikov/go-bones/logger"
+	"github.com/im-kulikov/gonfig"
 )
 
-// Config interface that allows to set and validate
-// project configuration.
-type Config interface {
-	Validate(context.Context) error
+type settings struct {
+	appSettings
+
+	kind gonfig.ParserType
+
+	options []gonfig.LoaderOption
 }
 
-func (c *config) checkEnvPath() error {
-	if c.envPath != "" {
-		return nil
+// Option allows customizing configuration.
+type Option func(*settings)
+
+// WithName sets the application name.
+func WithName(name string) Option { return func(s *settings) { s.name = name } }
+
+// WithVersion sets the application version.
+func WithVersion(version string) Option { return func(s *settings) { s.version = version } }
+
+// WithParsers registers custom parsers in gonfig loader options.
+func WithParsers(loaders ...gonfig.Parser) Option {
+	return func(s *settings) {
+		for _, loader := range loaders {
+			s.options = append(s.options, gonfig.WithCustomParser(loader))
+		}
+	}
+}
+
+// WithParserInit registers custom parser initializers in gonfig loader options.
+func WithParserInit(prepares ...gonfig.ParserInit) Option {
+	return func(s *settings) {
+		for _, preparer := range prepares {
+			s.options = append(s.options, gonfig.WithCustomParserInit(preparer))
+		}
+	}
+}
+
+// WithLoaderOptions appends raw gonfig loader options.
+func WithLoaderOptions(options ...gonfig.LoaderOption) Option {
+	return func(s *settings) { s.options = append(s.options, options...) }
+}
+
+// WithCustomizeLoaderConfig registers a callback that mutates gonfig.Config before loading.
+func WithCustomizeLoaderConfig(handler func(*gonfig.Config)) Option {
+	return func(s *settings) { s.options = append(s.options, gonfig.WithConfig(handler)) }
+}
+
+// WithYAML enables YAML parsing and makes it the preferred parser kind.
+func WithYAML() Option {
+	return func(s *settings) {
+		s.kind = gonfig.ParserYAML
+		s.options = append(s.options, gonfig.WithYAMLLoader())
+	}
+}
+
+// WithJSON enables JSON parsing and makes it the preferred parser kind.
+func WithJSON() Option {
+	return func(s *settings) {
+		s.kind = gonfig.ParserJSON
+		s.options = append(s.options, gonfig.WithJSONLoader())
+	}
+}
+
+// WithTOML enables TOML parsing and makes it the preferred parser kind.
+func WithTOML() Option {
+	return func(s *settings) {
+		s.kind = gonfig.ParserTOML
+		s.options = append(s.options, gonfig.WithTOMLLoader())
+	}
+}
+
+func (c *settings) setDefaults() {
+	if info, ok := debug.ReadBuildInfo(); ok {
+		c.name = info.Main.Path
+		c.version = info.Main.Version
+	}
+}
+
+// Load fills v from configuration sources configured through Option values.
+// YAML loading is enabled by default when no parser option was supplied.
+func Load(v any, options ...Option) error {
+	var cfg settings
+
+	cfg.setDefaults()
+	for _, option := range options {
+		option(&cfg)
 	}
 
-	var err error
-	if c.envPath, err = c.pwd(); err != nil {
+	if cfg.kind == "" { // enable yaml by default
+		cfg.kind = gonfig.ParserYAML
+		cfg.options = append(cfg.options, gonfig.WithYAMLLoader())
+	}
+
+	if err := gonfig.Load(v, cfg.options...); err != nil {
 		return err
 	}
 
-	return nil
-}
-
-var (
-	errVersion      = errors.New("show version")
-	errShowHelp     = errors.New("show help")
-	errValidate     = errors.New("validate")
-	errMarkdown     = errors.New("markdown")
-	errFailValidate = errors.New("could not validate config")
-)
-
-func (c *config) generateDefaultEnvs(field aconfig.Field) bool {
-	value := field.Tag("default")
-	names := field.Tag("env")
-	usage := field.Tag("usage")
-
-	current := field
-	if value == "" {
-		value = "<empty>"
-	}
-
-	pad := 50
-
-	var ok bool
-	for {
-		if current, ok = current.Parent(); !ok {
-			break
-		}
-
-		names = fmt.Sprintf("%s_%s", current.Tag("env"), names)
-	}
-
-	var line strings.Builder
-	_, _ = line.WriteString(names)
-	_, _ = line.WriteString("=")
-	_, _ = line.WriteString(value)
-
-	if usage != "" {
-		_, _ = line.WriteString(strings.Repeat(" ", pad-line.Len()))
-		_, _ = line.WriteString("# " + usage)
-	}
-
-	_, _ = fmt.Fprintln(c.out, line.String())
-
-	return true
-}
-
-func (c *config) renderHelp(l *aconfig.Loader, fs *flag.FlagSet) {
-	output := fs.Output()
-
-	_, _ = fmt.Fprintln(output, "Usage:")
-	_, _ = fmt.Fprintln(output)
-
-	c.renderFlags(fs)
-
-	var out strings.Builder
-
-	_, _ = fmt.Fprintf(output, "\nDefault envs:\n%s\n", out.String())
-
-	l.WalkFields(c.generateDefaultEnvs)
-}
-
-func (c *config) loadConfig(ctx context.Context, cfg Config) (err error) {
-	if err = c.checkEnvPath(); err != nil {
-		return fmt.Errorf("could not get current directory: %w", err)
-	}
-
-	c.envs = append(os.Environ(), c.envs...)
-
-	loader := aconfig.LoaderFor(cfg, aconfig.Config{
-		AllowUnknownFields: true,
-		SkipFlags:          true,
-		Envs:               c.envs,
-		Files:              []string{path.Join(c.envPath, ".env")},
-		FileDecoders: map[string]aconfig.FileDecoder{
-			".env": aconfigdotenv.New(),
-		},
-	})
-
-	flags := loader.Flags()
-	flags.SetOutput(c.out)
-	flags.Usage = func() { c.renderHelp(loader, flags) }
-
-	c.attachFlags(flags)
-
-	if err = flags.Parse(c.args); err != nil && !errors.Is(err, flag.ErrHelp) {
-		return fmt.Errorf("could not parse flags: %w", err)
-	}
-
-	defer func() {
-		switch {
-		default:
-		case c.showCurr:
-			// on version requested
-			_, _ = fmt.Fprintln(c.out, c.version)
-
-			c.exit(0)
-
-			err = errVersion
-
-		case c.markdown:
-			// on markdown requested
-			c.generateMarkdown(loader)
-
-			c.exit(0)
-
-			err = errMarkdown
-		case c.validate:
-			// on validate requested
-			if err = cfg.Validate(ctx); err != nil {
-				c.fatalf("could not validate config: %s", err)
-
-				c.exit(2)
-
-				err = errFailValidate
-
-				return
-			}
-
-			_, _ = fmt.Fprintln(c.out, "OK")
-
-			c.exit(0)
-
-			err = errValidate
-		case c.showHelp:
-			// on help requested
-			c.renderHelp(loader, flags)
-
-			c.exit(0)
-
-			err = errShowHelp
-		}
-	}()
-
-	err = loader.Load()
-
-	return
-}
-
-// Load returns an error if
-// - Config is not a pointer to struct
-// - could not load configuration from env
-// - could not validate config
-//
-// otherwise it pass configuration to Config.
-func Load(ctx context.Context, cfg Config, opts ...Option) error {
-	if reflect.ValueOf(cfg).Kind() != reflect.Ptr {
-		return fmt.Errorf("config variable must be a pointer")
-	}
-
-	options := config{
-		pwd:  os.Getwd,
-		out:  os.Stdout,
-		exit: os.Exit,
-		args: os.Args[1:],
-		envs: os.Environ(),
-
-		fatalf: logger.Default().Fatalf,
-	}
-
-	for _, o := range opts {
-		o(&options)
-	}
-
-	if err := options.loadConfig(ctx, cfg); err != nil {
-		return fmt.Errorf("could not load config: %w", err)
-	}
-
-	return cfg.Validate(ctx)
+	return setAppSettings(v, cfg.name, cfg.version)
 }

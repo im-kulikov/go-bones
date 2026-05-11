@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -12,19 +14,26 @@ import (
 )
 
 func TestPingPong(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), time.Millisecond*100)
+		defer cancel()
 
-	svc := newPingPong(logger.ForTests(t), time.Second)
+		var wg sync.WaitGroup
+		log := logger.ForTests()
+		svc := newPingPong(log, time.Millisecond*25)
 
-	go func() {
-		// we should not panic on multiple call of stop
-		assert.NotPanics(t, func() {
-			svc.Stop(ctx)
-			svc.Stop(ctx)
-			svc.Stop(ctx)
+		wg.Go(func() {
+			<-ctx.Done()
+
+			// we should not panic on multiple call of stop
+			assert.NotPanics(t, func() {
+				svc.Stop(ctx)
+				svc.Stop(ctx)
+				svc.Stop(ctx)
+			})
 		})
-	}()
 
-	require.NoError(t, svc.Start(ctx))
+		require.NoError(t, RunContext(ctx, log, WithService(svc)))
+		wg.Wait()
+	})
 }

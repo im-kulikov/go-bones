@@ -2,50 +2,31 @@ package service
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"github.com/im-kulikov/go-bones/logger"
 )
 
-type pingPong struct {
-	log     logger.Logger
-	timeout time.Duration
+const pingPongServiceName = "ping-pong"
 
-	once sync.Once
-	done chan struct{}
-}
+// newPingPong returns an instance of Service that wraps the launcher function named "ping-pong" with the logger.
+func newPingPong(l *logger.Logger, timeout time.Duration) Service {
+	return NewLauncher(pingPongServiceName, func(ctx context.Context) error {
+		log := logger.Named(l, pingPongServiceName)
 
-func newPingPong(log logger.Logger, timeout time.Duration) Service {
-	log.Infow("ping-pong service", "timer", timeout)
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
 
-	return &pingPong{log: log, timeout: timeout, done: make(chan struct{})}
-}
+		log.Info("would be run with next settings", logger.Duration("interval", timeout))
 
-// Name of the service.
-func (p *pingPong) Name() string { return "ping-pong" }
-
-// Start ping-pong service.
-func (p *pingPong) Start(ctx context.Context) error {
-	timer := time.NewTimer(p.timeout)
-	defer timer.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-p.done:
-			return nil
-		case <-timer.C:
-			p.log.Info("ping-pong")
-			timer.Reset(p.timeout)
+		for {
+			select {
+			case <-ctx.Done():
+				return context.Cause(ctx)
+			case <-timer.C:
+				log.Info(pingPongServiceName)
+				timer.Reset(timeout)
+			}
 		}
-	}
-}
-
-// Stop ping-pong service.
-func (p *pingPong) Stop(_ context.Context) {
-	p.once.Do(func() {
-		close(p.done)
 	})
 }

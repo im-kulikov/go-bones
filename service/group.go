@@ -1,28 +1,55 @@
 package service
 
-import "context"
+import (
+	"context"
+	"fmt"
+	"strings"
 
-// Group allows to provide runner of services.
-type Group struct {
-	name string
-	opts []Service
+	"github.com/im-kulikov/go-bones"
+)
+
+// ErrComposedServiceNotRunnable is returned when attempting to start a composed service directly.
+const ErrComposedServiceNotRunnable bones.Error = "composed service is not runnable"
+
+// composed is a lightweight container used to pass multiple services through APIs
+// that accept a single Service value.
+//
+// It intentionally satisfies Service only as a transport shape for composition:
+// orchestration helpers unwrap it, but the container itself does not own a runnable
+// lifecycle.
+type composed []Service
+
+// Name returns a string listing all service names in the composed service.
+func (g composed) Name() string {
+	services := make([]string, 0, len(g))
+	for _, service := range g {
+		services = append(services, service.Name())
+	}
+
+	return fmt.Sprintf("composed-services(%s)", strings.Join(services, ","))
 }
 
-// Name used to implement Service interface.
-func (g *Group) Name() string { return g.name }
+// Stop implements Service, but composed services do not manage their own lifecycle.
+// It is a no-op because composed services are intended only for service composition.
+func (g composed) Stop(context.Context) {}
 
-// Stop used to implement Service interface.
-func (g *Group) Stop(context.Context) {}
+// Start implements Service, but composed services are not intended to be started directly.
+// Use Compose only as a container for service composition, for example with WithService.
+func (g composed) Start(context.Context) error {
+	return ErrComposedServiceNotRunnable
+}
 
-// Start used to implement Service interface.
-func (g *Group) Start(context.Context) error { return nil }
-
-// Services return multiple services.
-func (g *Group) Services() []Service { return g.opts }
-
-// NewGroup returns a group of services.
-func NewGroup(name string, services ...Service) Service {
-	out := &Group{name: name, opts: make([]Service, 0, len(services))}
+// Compose constructs a composed service from the provided services.
+//
+// Why it returns Service instead of []Service:
+//   - existing option helpers accept Service values;
+//   - a composed wrapper lets callers pass a group through the same surface;
+//   - service execution still happens only after helpers unwrap the container.
+//
+// Nil services and disabled services (for types implementing Enabler) are excluded
+// so callers can assemble optional trees without extra filtering code.
+func Compose(services ...Service) Service {
+	out := make(composed, 0, len(services))
 	for _, svc := range services {
 		if svc == nil {
 			continue
@@ -32,7 +59,7 @@ func NewGroup(name string, services ...Service) Service {
 			continue
 		}
 
-		out.opts = append(out.opts, svc)
+		out = append(out, svc)
 	}
 
 	return out
