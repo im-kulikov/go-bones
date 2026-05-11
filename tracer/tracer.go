@@ -5,7 +5,7 @@ import (
 	"errors"
 	"os"
 	"strings"
-	"sync/atomic"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -27,6 +27,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/im-kulikov/go-bones/config"
+	"github.com/im-kulikov/go-bones/internal"
 	"github.com/im-kulikov/go-bones/logger"
 	"github.com/im-kulikov/go-bones/service"
 )
@@ -91,14 +92,6 @@ var (
 	newLogExporterFunc    = newLogExporter
 )
 
-type bootstrap struct {
-	cfg config.TracerConfig
-	log *logger.Logger
-
-	start atomic.Bool
-	list  atomic.Pointer[hooks]
-}
-
 func (h *hooks) run(ctx context.Context) error {
 	if h == nil {
 		return nil
@@ -112,6 +105,17 @@ func (h *hooks) run(ctx context.Context) error {
 	return err
 }
 
+func enabled(cfg config.TracerConfig) bool {
+	if disabledByEnv() {
+		return false
+	}
+
+	return cfg.Enabled ||
+		cfg.SendMetrics ||
+		cfg.SendLogs ||
+		hasStandardBootstrapConfiguration()
+}
+
 // Init creates a lifecycle service that bootstraps process-wide OpenTelemetry state.
 //
 // The package follows an env-first approach:
@@ -123,51 +127,34 @@ func Init(log *logger.Logger, cfg config.TracerConfig) service.Service {
 		log = logger.Default()
 	}
 
-	state := &bootstrap{
-		cfg: cfg,
-		log: logger.Named(log, "go-bones", "tracer"),
-	}
+	l := logger.Named(log, "go-bones", "tracer")
+	if !enabled(cfg) {
+		l.Info("tracing disabled")
 
-	return service.NewLauncher(tracerServiceName, state.run,
-		service.WithLauncherLogger(state.log),
-		service.WithLauncherShutdownHooks(state.stop))
-}
-
-func (b *bootstrap) run(ctx context.Context) error {
-	if !b.enabled() {
 		return nil
 	}
 
-	if !b.start.Swap(true) {
-		out, err := bootstrapProviders(ctx, b.cfg)
-		if err != nil {
-			return err
-		}
+	return service.NewLauncher(tracerServiceName,
+		func(ctx context.Context) error {
+			l.InfoContext(ctx, "bootstrap providers")
 
-		b.list.Store(&out)
-		b.log.InfoContext(ctx, "tracing initialized")
-	}
+			out, err := bootstrapProviders(ctx, cfg)
+			if err != nil {
+				return err
+			}
 
-	<-ctx.Done()
+			l.InfoContext(ctx, "tracing initialized")
+			defer internal.LazyGracefulShutdown(ctx, time.Second*10, func(ctx context.Context) {
+				if err = out.run(ctx); err != nil {
+					l.ErrorContext(ctx, "could not shutdown", logger.Err(err))
+				}
+			})()
 
-	return context.Cause(ctx)
-}
+			<-ctx.Done()
 
-func (b *bootstrap) stop(ctx context.Context) {
-	if err := b.list.Load().run(ctx); err != nil && !errors.Is(err, context.Canceled) {
-		b.log.ErrorContext(ctx, "tracing shutdown failed", logger.Err(err))
-	}
-}
-
-func (b *bootstrap) enabled() bool {
-	if disabledByEnv() {
-		return false
-	}
-
-	return b.cfg.Enabled ||
-		b.cfg.SendMetrics ||
-		b.cfg.SendLogs ||
-		hasStandardBootstrapConfiguration()
+			return context.Cause(ctx)
+		},
+		service.WithLauncherLogger(l))
 }
 
 func bootstrapProviders(ctx context.Context, cfg config.TracerConfig) (hooks, error) {

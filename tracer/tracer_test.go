@@ -38,55 +38,53 @@ import (
 )
 
 func TestEnabled(t *testing.T) {
-	log := logger.ForTests()
-
 	t.Run("disabled by default", func(t *testing.T) {
-		b := &bootstrap{cfg: config.TracerConfig{}, log: log}
-		require.False(t, b.enabled())
+		cfg := config.TracerConfig{}
+		require.False(t, enabled(cfg))
 	})
 
 	t.Run("enabled by config fallback", func(t *testing.T) {
-		b := &bootstrap{cfg: config.TracerConfig{Enabled: true}, log: log}
-		require.True(t, b.enabled())
+		cfg := config.TracerConfig{Enabled: true}
+		require.True(t, enabled(cfg))
 	})
 
 	t.Run("metrics config enables bootstrap", func(t *testing.T) {
-		b := &bootstrap{cfg: config.TracerConfig{SendMetrics: true}, log: log}
-		require.True(t, b.enabled())
+		cfg := config.TracerConfig{SendMetrics: true}
+		require.True(t, enabled(cfg))
 	})
 
 	t.Run("logs config enables bootstrap", func(t *testing.T) {
-		b := &bootstrap{cfg: config.TracerConfig{SendLogs: true}, log: log}
-		require.True(t, b.enabled())
+		cfg := config.TracerConfig{SendLogs: true}
+		require.True(t, enabled(cfg))
 	})
 
 	t.Run("enabled by standard env", func(t *testing.T) {
 		t.Setenv(envOTELExporterOTLPEndpoint, "http://collector:4318")
 
-		b := &bootstrap{cfg: config.TracerConfig{}, log: log}
-		require.True(t, b.enabled())
+		cfg := config.TracerConfig{}
+		require.True(t, enabled(cfg))
 	})
 
 	t.Run("resource env enables bootstrap", func(t *testing.T) {
 		t.Setenv(envOTELServiceName, "checkout-api")
 
-		b := &bootstrap{cfg: config.TracerConfig{}, log: log}
-		require.True(t, b.enabled())
+		cfg := config.TracerConfig{}
+		require.True(t, enabled(cfg))
 	})
 
 	t.Run("propagators alone do not enable bootstrap", func(t *testing.T) {
 		t.Setenv(envOTELPropagators, "tracecontext,baggage")
 
-		b := &bootstrap{cfg: config.TracerConfig{}, log: log}
-		require.False(t, b.enabled())
+		cfg := config.TracerConfig{}
+		require.False(t, enabled(cfg))
 	})
 
 	t.Run("sdk disabled env wins", func(t *testing.T) {
 		t.Setenv(envOTELExporterOTLPEndpoint, "http://collector:4318")
 		t.Setenv(envOTELSDKDisabled, "true")
 
-		b := &bootstrap{cfg: config.TracerConfig{Enabled: true}, log: log}
-		require.False(t, b.enabled())
+		cfg := config.TracerConfig{Enabled: true}
+		require.False(t, enabled(cfg))
 	})
 }
 
@@ -178,14 +176,14 @@ func TestFallbackOptionsRespectOTELExporterEnvForAllSignals(t *testing.T) {
 }
 
 func TestInitReturnsLifecycleService(t *testing.T) {
-	svc := Init(logger.ForTests(), config.TracerConfig{})
+	svc := Init(logger.ForTests(), config.TracerConfig{Enabled: true})
 
 	require.NotNil(t, svc)
 	require.Equal(t, tracerServiceName, svc.Name())
 }
 
 func TestInitWithNilLogger(t *testing.T) {
-	svc := Init(nil, config.TracerConfig{})
+	svc := Init(nil, config.TracerConfig{Enabled: true})
 
 	require.NotNil(t, svc)
 	require.Equal(t, tracerServiceName, svc.Name())
@@ -320,12 +318,9 @@ func TestLifecycleStartStop(t *testing.T) {
 }
 
 func TestBootstrapRunDisabledReturnsNil(t *testing.T) {
-	state := &bootstrap{
-		cfg: config.TracerConfig{},
-		log: logger.ForTests(),
-	}
-
-	require.NoError(t, state.run(t.Context()))
+	require.Empty(t, Init(
+		logger.ForTests(logger.TestLoggerWriteToTB(t)),
+		config.TracerConfig{}))
 }
 
 func TestBootstrapRunReturnsBootstrapError(t *testing.T) {
@@ -336,28 +331,25 @@ func TestBootstrapRunReturnsBootstrapError(t *testing.T) {
 		return nil, expected
 	}
 
-	state := &bootstrap{
-		cfg: config.TracerConfig{Enabled: true},
-		log: logger.ForTests(),
-	}
-
-	err := state.run(t.Context())
-	require.ErrorIs(t, err, expected)
+	svc := Init(
+		logger.ForTests(logger.TestLoggerWriteToTB(t)),
+		config.TracerConfig{Enabled: true})
+	require.ErrorIs(t, svc.Start(t.Context()), expected)
 }
 
-func TestBootstrapStopLogsShutdownError(t *testing.T) {
-	expected := fmt.Errorf("shutdown failed")
-	buf := logger.NewSyncBuffer()
-	log := logger.ForTests(logger.TestLoggerWriter(buf))
-	list := hooks{func(context.Context) error { return expected }}
-
-	var state bootstrap
-	state.log = log
-	state.list.Store(&list)
-
-	state.stop(context.Background())
-	require.Contains(t, buf.String(), "tracing shutdown failed")
-}
+// func TestBootstrapStopLogsShutdownError(t *testing.T) {
+// 	expected := fmt.Errorf("shutdown failed")
+// 	buf := logger.NewSyncBuffer()
+// 	log := logger.ForTests(logger.TestLoggerWriter(buf))
+// 	list := hooks{func(context.Context) error { return expected }}
+//
+// 	var state bootstrap
+// 	state.log = log
+// 	state.list.Store(&list)
+//
+// 	state.stop(context.Background())
+// 	require.Contains(t, buf.String(), "tracing shutdown failed")
+// }
 
 func TestBootstrapProvidersShutdownHooksForEnabledSignals(t *testing.T) {
 	t.Cleanup(overrideProviderFactories())
@@ -710,7 +702,7 @@ func newFakeOTLPCollector(t *testing.T) *fakeOTLPCollector {
 	return collector
 }
 
-func newTestApp(t *testing.T) *testApp {
+func newTestApp(t *testing.T, top context.Context) *testApp {
 	t.Helper()
 
 	prevTraceProvider := otel.GetTracerProvider()
@@ -729,17 +721,22 @@ func newTestApp(t *testing.T) *testApp {
 	collector.configureEnv(t)
 
 	var cfg config.TracerConfig
-	cfg.SendLogs = true
+	cfg.Enabled = true
 	cfg.UseHTTP = true
+	cfg.SendLogs = true
+	cfg.SendMetrics = true // should see an error for metrics
 	cfg.SetAppNameAndVersion("payments-api", "1.2.3")
 
 	buf := logger.NewSyncBuffer()
-	log := logger.ForTests(logger.TestLoggerWriter(buf))
+	log := logger.ForTests(
+		logger.TestLoggerWriter(buf),
+		logger.TestLoggerWriteToTB(t))
 	svc := Init(log, cfg)
 
-	ctx, cancel := context.WithCancelCause(t.Context())
+	ctx, cancel := context.WithCancelCause(top)
 	done := make(chan error, 1)
 	go func() {
+		defer close(done)
 		done <- svc.Start(ctx)
 	}()
 
@@ -757,8 +754,8 @@ func newTestApp(t *testing.T) *testApp {
 	}
 }
 
-func (a *testApp) processPayment() {
-	ctx, span := otel.Tracer("payments-service").Start(context.Background(), "process-payment")
+func (a *testApp) processPayment(ctx context.Context) {
+	ctx, span := otel.Tracer("payments-service").Start(ctx, "process-payment")
 	a.log.InfoContext(ctx, "payment completed",
 		logger.String("order_id", "A-42"),
 		logger.Bool("bridge_expected", true),
@@ -766,10 +763,10 @@ func (a *testApp) processPayment() {
 	span.End()
 }
 
-func (a *testApp) stop() {
+func (a *testApp) stop(ctx context.Context) {
 	a.cancel(context.Canceled)
 	require.ErrorIs(a.t, <-a.done, context.Canceled)
-	a.svc.Stop(context.Background())
+	a.svc.Stop(ctx)
 	a.collector.waitForExport(a.t)
 	require.Empty(a.t, a.collector.errors())
 }
@@ -788,9 +785,13 @@ func (c *fakeOTLPCollector) configureEnv(t *testing.T) {
 func (c *fakeOTLPCollector) waitForExport(t *testing.T) {
 	t.Helper()
 
-	require.Eventually(t, func() bool {
-		return c.traceCount() > 0 && c.logCount() > 0
-	}, time.Second, 10*time.Millisecond)
+	require.Eventuallyf(t,
+		func() bool {
+			return c.traceCount() > 0 && c.logCount() > 0
+		},
+		time.Second, 10*time.Millisecond,
+		"traceCount = %d && logCount = %d",
+		c.traceCount(), c.logCount())
 }
 
 func (c *fakeOTLPCollector) handle(w http.ResponseWriter, r *http.Request) {

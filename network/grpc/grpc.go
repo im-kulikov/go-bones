@@ -15,6 +15,7 @@ import (
 
 	"github.com/im-kulikov/go-bones"
 	"github.com/im-kulikov/go-bones/config"
+	"github.com/im-kulikov/go-bones/internal"
 	"github.com/im-kulikov/go-bones/logger"
 	"github.com/im-kulikov/go-bones/network"
 	"github.com/im-kulikov/go-bones/service"
@@ -31,11 +32,10 @@ type serverOptions struct {
 	addr string
 	mu   sync.RWMutex
 	open network.ListenOpener
-	base config.BaseGRPC
+	base config.Network
 
 	grpc *Server
 	log  *logger.Logger
-	once sync.Once
 	opts []ServerOption
 	init []func(*Server)
 }
@@ -48,7 +48,6 @@ type (
 const (
 	defaultGRPCNetwork     = "tcp"
 	defaultGRPCServiceName = "grpc-service"
-	defaultTimeout         = 15 * time.Second
 
 	grpcServerStarting = "grpc server starting"
 
@@ -102,7 +101,7 @@ func WithOpenTelemetry() Option {
 // serialized through serverOptions.once. This keeps parent-cancel and explicit Stop
 // behavior aligned without letting grpc.Server shutdown run twice.
 func NewServer(
-	cfg config.GRPCConfig,
+	cfg config.INetwork,
 	log *logger.Logger,
 	opts ...Option,
 ) (service.Service, error) {
@@ -114,8 +113,6 @@ func NewServer(
 	return service.NewLauncher(options.name, options.listen,
 		service.WithLauncherLogger(log),
 		service.WithLauncherShutdownHooks(func(ctx context.Context) {
-			options.shutdown(ctx)
-
 			options.log.InfoContext(ctx, "shutdown gracefully done",
 				logger.String("service", options.name),
 				logger.String("address", options.address()))
@@ -141,7 +138,7 @@ func (h *serverOptions) setAddress(addr string) {
 // prepareServer resolves config and creates the concrete grpc.Server instance.
 // It performs all non-blocking setup up front so Start can focus on runtime work.
 func prepareServer(
-	cfg config.GRPCConfig,
+	cfg config.INetwork,
 	log *logger.Logger,
 	opts ...Option,
 ) (*serverOptions, error) {
@@ -189,62 +186,29 @@ func (h *serverOptions) listen(top context.Context) error {
 
 	h.setAddress(lis.Addr().String())
 
-	h.log.Info(grpcServerStarting,
+	h.log.InfoContext(top, grpcServerStarting,
 		logger.String("service", h.name),
 		logger.String("address", h.address()))
 
-	context.AfterFunc(top, func() {
-		ctx, cancel := context.WithTimeout(context.WithoutCancel(top), h.shutdownTimeout())
-		defer cancel()
+	ctx, cancel := context.WithCancelCause(top)
+	defer cancel(context.Canceled)
 
-		h.shutdown(ctx)
-	})
+	defer internal.LazyGracefulShutdown(ctx, h.base.ShutdownTimeout, func(ctx context.Context) {
+		h.log.InfoContext(ctx, "try to graceful shutdown",
+			logger.String("name", h.name))
+
+		defer time.AfterFunc(internal.FallbackTimeout(h.base.ShutdownTimeout), h.grpc.Stop).Stop()
+
+		h.grpc.GracefulStop()
+	})()
 
 	if err = h.grpc.Serve(lis); err != nil && !errors.Is(err, ErrServerStopped) {
+		cancel(err)
+
 		return err
 	}
 
 	return nil
-}
-
-// shutdownTimeout returns the configured graceful shutdown timeout with a safe fallback.
-func (h *serverOptions) shutdownTimeout() time.Duration {
-	timeout := h.base.ShutdownTimeout
-	if timeout <= 0 {
-		timeout = defaultTimeout
-	}
-
-	return timeout
-}
-
-// The shutdown gracefully stops the `grpc.Server` once.
-//
-// GracefulStop may block while in-flight RPCs finish, so a timer escalates to Stop
-// after shutdownTimeout. The sync.Once guard is important because shutdown can be
-// requested from both explicit Stop and parent-context cancellation.
-func (h *serverOptions) shutdown(ctx context.Context) {
-	h.once.Do(func() {
-		stopDone := make(chan struct{})
-		timeout := h.shutdownTimeout()
-
-		h.log.InfoContext(ctx, "try to graceful shutdown", logger.String("name", h.name))
-
-		defer time.AfterFunc(timeout, func() {
-			h.forceStop(stopDone)
-		}).Stop()
-
-		h.grpc.GracefulStop()
-		close(stopDone)
-	})
-}
-
-// forceStop escalates graceful shutdown to grpc.Server.Stop unless shutdown already finished.
-func (h *serverOptions) forceStop(stopDone <-chan struct{}) {
-	select {
-	case <-stopDone:
-	default:
-		h.grpc.Stop()
-	}
 }
 
 func openTelemetryUnaryServerInterceptor() UnaryServerInterceptor {

@@ -108,8 +108,8 @@ func Test_HTTPServer_ShutdownBehavior_Integration(t *testing.T) {
 
 		log := logger.ForTests(logger.TestLoggerWriteToTB(t))
 		cfg := customHTTPSettings{
-			BaseHTTP: config.BaseHTTP{ShutdownTimeout: 10 * time.Millisecond},
-			Address:  lis.Addr().String(),
+			Network: config.Network{ShutdownTimeout: 10 * time.Millisecond},
+			Address: lis.Addr().String(),
 		}
 
 		svc, err := NewServer(
@@ -156,8 +156,8 @@ func Test_HTTPServer_ShutdownBehavior_Integration(t *testing.T) {
 		expect := 250 * time.Millisecond
 
 		cfg := customHTTPSettings{
-			BaseHTTP: config.BaseHTTP{ShutdownTimeout: expect},
-			Address:  lis.Addr().String(),
+			Network: config.Network{ShutdownTimeout: expect},
+			Address: lis.Addr().String(),
 		}
 
 		requestStarted := make(chan struct{})
@@ -204,8 +204,8 @@ func Test_HTTPServer_ShutdownBehavior_Integration(t *testing.T) {
 
 		log := logger.ForTests(logger.TestLoggerWriteToTB(t))
 		cfg := customHTTPSettings{
-			BaseHTTP: config.BaseHTTP{ShutdownTimeout: 0},
-			Address:  lis.Addr().String(),
+			Network: config.Network{ShutdownTimeout: 0},
+			Address: lis.Addr().String(),
 		}
 
 		requestStarted := make(chan struct{})

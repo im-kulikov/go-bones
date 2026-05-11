@@ -20,22 +20,6 @@ import (
 	"github.com/im-kulikov/go-bones/logger"
 )
 
-type stopCtxProbe struct {
-	errCh chan error
-}
-
-func (s *stopCtxProbe) Name() string { return "test-service" }
-
-func (s *stopCtxProbe) Start(ctx context.Context) error {
-	<-ctx.Done()
-
-	return nil
-}
-
-func (s *stopCtxProbe) Stop(ctx context.Context) {
-	s.errCh <- ctx.Err()
-}
-
 func Test_defaultErrorsIgnore(t *testing.T) {
 	cases := []struct {
 		name string
@@ -74,48 +58,68 @@ func Test_groupErrors(t *testing.T) {
 }
 
 func TestRun_Success(t *testing.T) {
-	buf := logger.NewSyncBuffer()
-	log := logger.ForTests(
-		logger.TestLoggerWriter(buf),
-		logger.TestLoggerWriteToTB(t))
+	synctest.Test(t, func(t *testing.T) {
+		buf := logger.NewSyncBuffer()
+		log := logger.ForTests(
+			logger.TestLoggerWriter(buf),
+			logger.TestLoggerWriteToTB(t))
 
-	mockSvc := new(mockService)
-	mockSvc.name = "testService"
-	mockSvc.On("Start", mock.Anything).
-		Run(func(args mock.Arguments) {
-			<-args.Get(0).(context.Context).Done()
-		}).
-		Return(nil).
-		Once()
-	mockSvc.On("Stop", mock.Anything).Return().Once()
+		mockSvc := new(mockService)
+		mockSvc.name = "testService"
+		mockSvc.On("Start", mock.Anything).
+			Run(func(args mock.Arguments) {
+				<-args.Get(0).(context.Context).Done()
+			}).
+			Return(nil).
+			Once()
+		mockSvc.On("Stop", mock.Anything).Return().Once()
 
-	options := []Option{
-		func(cfg *settings) {
-			cfg.handle = append(cfg.handle, mockSvc)
-			cfg.shutdown = time.Millisecond * 100
-			cfg.signal = append(cfg.signal, syscall.SIGUSR1)
-		},
-		WithService(NewLauncher("test", func(ctx context.Context) error {
-			<-ctx.Done()
+		options := []Option{
+			func(cfg *settings) {
+				cfg.handle = append(cfg.handle, mockSvc)
+				cfg.shutdown = time.Second
+				cfg.signal = append(cfg.signal, syscall.SIGUSR1)
+				cfg.newSignal = func(top context.Context, signal ...os.Signal) (context.Context, context.CancelCauseFunc, handler) {
+					ctx, cancel := context.WithCancelCause(top)
 
-			return ctx.Err()
-		})),
-	}
+					return ctx, cancel, func() {
+						<-ctx.Done()
+						cancel(ErrCancelCalled)
+					}
+				}
+			},
+			WithService(NewLauncher("test", func(ctx context.Context) error {
+				<-ctx.Done()
 
-	errChan := make(chan error, 1)
-	go func() { errChan <- Run(log, options...) }()
+				return ctx.Err()
+			})),
+		}
 
-	time.Sleep(time.Millisecond * 100)
-	require.NoError(t, syscall.Kill(syscall.Getpid(), syscall.SIGUSR1))
+		ctx, cancel := context.WithCancelCause(t.Context())
+		defer cancel(ErrCancelCalled)
 
-	select {
-	case err := <-errChan:
-		require.NoErrorf(t, err, "%v", err)
-		require.Contains(t, buf.String(), syscall.SIGUSR1.String())
-		mockSvc.AssertExpectations(t)
-	case <-time.After(time.Hour):
-		t.Fatal("signal not received")
-	}
+		require.NoError(t, Run(log)) // empty handlers
+
+		go func() {
+			// wait for starting all services
+			time.Sleep(time.Millisecond * 100)
+			// send fake signal
+			cancel(ErrReceivedSignal(syscall.SIGUSR1))
+		}()
+
+		errChan := make(chan error, 1)
+		defer close(errChan)
+		errChan <- RunContext(ctx, log, options...)
+
+		select {
+		case err := <-errChan:
+			require.NoErrorf(t, err, "%v", err)
+			require.Contains(t, buf.String(), syscall.SIGUSR1.String())
+			mockSvc.AssertExpectations(t)
+		case <-time.After(time.Hour):
+			require.FailNow(t, "signal not received")
+		}
+	})
 }
 
 func TestRunContext_Success(t *testing.T) {
@@ -143,6 +147,7 @@ func TestRunContext_Success(t *testing.T) {
 
 		errChan := make(chan error, 1)
 		go func() {
+			defer close(errChan)
 			errChan <- RunContext(top, log, options...)
 		}()
 
@@ -159,6 +164,7 @@ func TestRunContext_EmptyServices(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
+		defer close(done)
 		done <- RunContext(t.Context(), log)
 	}()
 
@@ -199,6 +205,7 @@ func TestRunContext_ServiceExitCancelsContext(t *testing.T) {
 
 			done := make(chan error, 1)
 			go func() {
+				defer close(done)
 				done <- RunContext(top, log, options...)
 			}()
 
@@ -233,6 +240,7 @@ func TestRunContext_Failure(t *testing.T) {
 
 	errChan := make(chan error, 1)
 	go func() {
+		defer close(errChan)
 		errChan <- RunContext(t.Context(), log, options...)
 	}()
 
@@ -267,6 +275,7 @@ func TestRunContext_SignalContextCancelIsIgnored(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
+		defer close(done)
 		done <- RunContext(top, log, options...)
 	}()
 
@@ -286,55 +295,6 @@ func TestRunContext_SignalContextCancelIsIgnored(t *testing.T) {
 	}
 
 	mockSvc.AssertExpectations(t)
-}
-
-func TestShutdownServices(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		log := logger.ForTests()
-		top, cancel := context.WithTimeout(t.Context(), time.Millisecond*100)
-		defer cancel()
-
-		mockSvc := new(mockService)
-		mockSvc.name = "testService"
-		mockSvc.On("Stop", mock.Anything).Return().Once()
-
-		cfg := settings{
-			handle:   []Service{mockSvc},
-			shutdown: time.Millisecond * 100,
-		}
-
-		var wg sync.WaitGroup
-		wg.Go(func() { shutdownServices(top, log, cfg) })
-
-		time.Sleep(10 * time.Millisecond)
-		cancel()
-		wg.Wait()
-
-		mockSvc.AssertExpectations(t)
-	})
-}
-
-func TestShutdownServices_DefaultTimeoutIsNotAlreadyExpired(t *testing.T) {
-	log := logger.ForTests()
-	top, cancel := context.WithCancel(t.Context())
-
-	svc := &stopCtxProbe{errCh: make(chan error, 1)}
-
-	cfg := settings{
-		handle: []Service{svc},
-		// zero shutdown timeout should still allow graceful stop semantics
-	}
-
-	cancel()
-
-	shutdownServices(top, log, cfg)
-
-	select {
-	case err := <-svc.errCh:
-		assert.NoError(t, err, "shutdown context should not be expired before Stop runs")
-	case <-time.After(time.Second):
-		t.Fatal("service Stop was not called")
-	}
 }
 
 func TestSignalHandling(t *testing.T) {

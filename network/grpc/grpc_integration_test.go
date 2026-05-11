@@ -154,8 +154,8 @@ func Test_GRPCServer_LogsShutdownCallback_Integration(t *testing.T) {
 	)
 
 	cfg := customGRPCSettings{
-		Address:  lis.Addr().String(),
-		BaseGRPC: config.BaseGRPC{ShutdownTimeout: time.Millisecond},
+		Address: lis.Addr().String(),
+		Network: config.Network{ShutdownTimeout: time.Millisecond},
 	}
 	srv, err := NewServer(cfg, log, ServiceName("custom-grpc"))
 	require.NoError(t, err)
@@ -198,7 +198,7 @@ func Test_GRPCServer_UsesConfiguredShutdownTimeout_Integration(t *testing.T) {
 
 	cfg := customGRPCSettings{
 		Address: lis.Addr().String(),
-		BaseGRPC: config.BaseGRPC{
+		Network: config.Network{
 			ShutdownTimeout: 250 * time.Millisecond,
 		},
 	}
@@ -404,7 +404,7 @@ func Test_GRPCServer_ForcesStopWhenShutdownTimeoutExceeded_Integration(t *testin
 
 	cfg := customGRPCSettings{
 		Address: lis.Addr().String(),
-		BaseGRPC: config.BaseGRPC{
+		Network: config.Network{
 			ShutdownTimeout: 20 * time.Millisecond,
 		},
 	}

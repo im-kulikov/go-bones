@@ -81,20 +81,18 @@ type runtimeConfig struct {
 }
 
 type httpConfig struct {
-	config.BaseHTTP `env:",squash" yaml:",inline" json:",inline" toml:",inline"`
-	Address         string `env:"ADDRESS" yaml:"address" json:"address" toml:"address" default:":8080"`
+	config.Network `env:",squash" yaml:",inline" json:",inline" toml:",inline"`
+	Address        string `env:"ADDRESS" yaml:"address" json:"address" toml:"address" default:":8080"`
 }
 
-func (c httpConfig) Addr() string          { return c.Address }
-func (c httpConfig) Base() config.BaseHTTP { return c.BaseHTTP }
+func (c httpConfig) Addr() string { return c.Address }
 
 type grpcConfig struct {
-	config.BaseGRPC `env:",squash" yaml:",inline" json:",inline" toml:",inline"`
-	Address         string `env:"ADDRESS" yaml:"address" json:"address" toml:"address" default:":9090"`
+	config.Network `env:",squash" yaml:",inline" json:",inline" toml:",inline"`
+	Address        string `env:"ADDRESS" yaml:"address" json:"address" toml:"address" default:":9090"`
 }
 
-func (c grpcConfig) Addr() string          { return c.Address }
-func (c grpcConfig) Base() config.BaseGRPC { return c.BaseGRPC }
+func (c grpcConfig) Addr() string { return c.Address }
 
 func main() {
 	var cfg appConfig
@@ -195,9 +193,7 @@ Key points:
 - YAML loading is enabled by default
 - app name and version are propagated into config sections that support them
 - `gonfig` still does the heavy lifting for env/YAML/JSON/TOML parsing
-- transport packages expect config types implementing:
-  - `config.HTTPConfig`
-  - `config.GRPCConfig`
+- transport packages expect config types implementing `config.INetwork`
 
 Typical custom config shape:
 
@@ -205,15 +201,19 @@ Typical custom config shape:
 type appConfig struct {
 	config.Base `env:",squash" yaml:",inline" json:",inline" toml:",inline"`
 
-	HTTP struct {
-		config.BaseHTTP `env:",squash" yaml:",inline" json:",inline" toml:",inline"`
-		Address string `env:"ADDRESS" yaml:"address" default:":8080"`
-	} `env:"HTTP" yaml:"http" json:"http" toml:"http"`
+	HTTP httpConfig `env:"HTTP" yaml:"http" json:"http" toml:"http"`
 
 	App struct {
 		WorkerInterval time.Duration `env:"WORKER_INTERVAL" yaml:"worker_interval" default:"15s"`
 	} `env:"APP" yaml:"app" json:"app" toml:"app"`
 }
+
+type httpConfig struct {
+	config.Network `env:",squash" yaml:",inline" json:",inline" toml:",inline"`
+	Address        string `env:"ADDRESS" yaml:"address" default:":8080"`
+}
+
+func (c httpConfig) Addr() string { return c.Address }
 ```
 
 Representative YAML:
@@ -523,8 +523,8 @@ svc, err := http.NewServer(
 Important behavior:
 
 - the package opens the listener once and serves on it directly
-- TLS is derived from `config.BaseHTTP.TLSConfig`
-- graceful shutdown uses `BaseHTTP.ShutdownTimeout` with a safe fallback
+- TLS is derived from `config.Network.TLSConfig`
+- graceful shutdown uses `config.Network.ShutdownTimeout` with a safe fallback
 - `WithOpenTelemetry()` extracts incoming trace context and creates server spans
 
 ## gRPC Service
@@ -549,9 +549,9 @@ svc, err := grpc.NewServer(
 
 Important behavior:
 
-- TLS is derived from `config.BaseGRPC.TLSConfig`
-- graceful shutdown uses `BaseGRPC.ShutdownTimeout` with a safe fallback
-- repeated shutdown calls are serialized internally
+- TLS is derived from `config.Network.TLSConfig`
+- graceful shutdown uses `config.Network.ShutdownTimeout` with a safe fallback
+- `service.NewLauncher` makes the server lifecycle one-shot and terminal after shutdown starts
 - `WithOpenTelemetry()` installs server-side unary and stream interceptors for trace extraction and span continuation
 
 ## OPS Service
@@ -580,6 +580,23 @@ When the process is built with `GOEXPERIMENT=goroutineleakprofile`, Go 1.26 also
 - `/debug/pprof/goroutineleak`
 
 Runtime metrics are exported through the standard Prometheus Go collector with `collectors.MetricsAll`, so scheduler, goroutine, GC, memory, and other Go 1.26 runtime metric groups are available.
+
+Applications can register additional Prometheus collectors in the OPS metrics registry before starting the server:
+
+```go
+requestsTotal := prometheus.NewCounter(prometheus.CounterOpts{
+	Name: "my_service_requests_total",
+	Help: "Total handled requests.",
+})
+
+if err := http.RegisterMetrics(requestsTotal); err != nil {
+	log.Error("register ops metrics", logger.Err(err))
+}
+
+opsSvc, err := http.NewOPSServer(cfg.OpsServer, log)
+```
+
+The OPS metrics registry is process-wide. Duplicate collector registration is returned as an error, so shared packages should register metrics once during startup.
 
 `OPS` metrics and OpenTelemetry metrics are intentionally separate telemetry paths. Applications may use either one or both.
 

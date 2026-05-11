@@ -29,14 +29,14 @@ import (
 )
 
 type customHTTPSettings struct {
-	config.BaseHTTP
+	config.Network
 	Address string
 }
 
 func (c customHTTPSettings) Addr() string { return c.Address }
 
 func Test_NewHTTPServer(t *testing.T) {
-	cfg := customHTTPSettings{BaseHTTP: config.BaseHTTP{TLSConfig: &config.TLS{Enabled: true}}}
+	cfg := customHTTPSettings{Network: config.Network{TLSConfig: &config.TLS{Enabled: true}}}
 	log := logger.ForTests(logger.TestLoggerWriteToTB(t))
 
 	require.ErrorIs(
@@ -53,7 +53,7 @@ func Test_serve_TLSConfigPresentButDisabled_UsesHTTPBranch(t *testing.T) {
 	h := &serverOptions{
 		Logger: log,
 		Server: &Server{},
-		base: config.BaseHTTP{
+		base: config.Network{
 			TLSConfig: &config.TLS{Enabled: false},
 		},
 		name: defaultHTTPServiceName,

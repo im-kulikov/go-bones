@@ -11,22 +11,14 @@ import (
 	"github.com/im-kulikov/go-bones/internal/testutil"
 )
 
-type TestGRPC struct {
-	Address string
-
-	BaseGRPC
-}
-
-func (c TestGRPC) Addr() string { return c.Address }
-
-func Test_ExampleGRPCSettings(t *testing.T) {
+func Test_OpsSettings(t *testing.T) {
 	testutil.RequireNetworkIntegration(t)
 
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	require.NoError(t, lis.Close())
 
-	var cfg TestGRPC
+	var cfg Ops
 	cfg.Address = lis.Addr().String()
 	cfg.ShutdownTimeout = time.Nanosecond
 
@@ -34,7 +26,7 @@ func Test_ExampleGRPCSettings(t *testing.T) {
 	require.ErrorIs(t, fetchError(cfg.PrepareTLSConfig()), ErrTLSDisabled)
 
 	require.Equal(t, lis.Addr().String(), cfg.Addr())
-	require.IsType(t, BaseGRPC{}, cfg.Base())
+	require.IsType(t, Network{}, cfg.Base())
 
 	// setup default TLS config
 	cfg.TLSConfig = new(TLS)

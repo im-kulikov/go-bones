@@ -156,15 +156,16 @@ func Test_Workers(t *testing.T) {
 		})
 
 	t.Run("should not run launcher on cancelled context", func(t *testing.T) {
+		log := logger.ForTests(logger.TestLoggerWriteToTB(t))
 		ctx, cancel := context.WithTimeout(t.Context(), time.Nanosecond)
 		defer cancel()
 
-		log := logger.ForTests()
-		wrk := NewLauncher("simple", func(top context.Context) error {
-			<-top.Done()
+		wrk := NewLauncher("simple",
+			func(top context.Context) error {
+				<-top.Done()
 
-			return context.Cause(top)
-		})
+				return context.Cause(top)
+			}, WithLauncherLogger(log))
 
 		require.NoError(t, RunContext(ctx, log,
 			WithShutdownTimeout(time.Nanosecond),

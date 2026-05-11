@@ -1,6 +1,7 @@
 package tracer
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
 	"testing"
@@ -14,10 +15,13 @@ import (
 func TestServiceBootstrapUsesBridgeAndExportsTelemetry(t *testing.T) {
 	testutil.RequireNetworkIntegration(t)
 
-	app := newTestApp(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
 
-	app.processPayment()
-	app.stop()
+	app := newTestApp(t, ctx)
+
+	app.processPayment(ctx)
+	app.stop(ctx)
 
 	exportedSpan := findExportedSpan(t, app.collector.firstTraceRequest(), "process-payment")
 	exportedLog := findExportedLog(t, app.collector.firstLogRequest(), "payment completed")

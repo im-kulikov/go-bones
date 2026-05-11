@@ -5,14 +5,13 @@ import (
 	"crypto/tls"
 	"errors"
 	"net"
-	"sync"
-	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/im-kulikov/go-bones"
 	"github.com/im-kulikov/go-bones/config"
+	"github.com/im-kulikov/go-bones/internal"
 	"github.com/im-kulikov/go-bones/logger"
 	"github.com/im-kulikov/go-bones/network"
 	"github.com/im-kulikov/go-bones/service"
@@ -20,8 +19,8 @@ import (
 
 type serverOptions struct {
 	name string
+	base config.Network
 	open network.ListenOpener
-	base config.BaseHTTP
 	otel bool
 
 	*Server
@@ -52,8 +51,6 @@ const (
 	// ErrHTTPShutdownServer indicates a failure during the shutdown process of the HTTP server.
 	ErrHTTPShutdownServer bones.Error = "http shutdown server"
 )
-
-const defaultTimeout = time.Second * 15
 
 // ServiceName overrides the lifecycle name used for the HTTP service.
 func ServiceName(name string) Option {
@@ -86,7 +83,7 @@ func WithOpenTelemetry() Option {
 
 // NewServer builds a service.Service that owns an http.Server lifecycle.
 func NewServer(
-	cfg config.HTTPConfig,
+	cfg config.INetwork,
 	log *logger.Logger,
 	opts ...Option,
 ) (service.Service, error) {
@@ -106,7 +103,7 @@ func NewServer(
 
 // The newServer initializes and returns an http.Server configured with the provided HTTPConfig.
 // It prepares TLS configuration if enabled and returns an error on failure excluding a disabled TLS scenario.
-func newServer(c config.HTTPConfig) (*Server, error) {
+func newServer(c config.INetwork) (*Server, error) {
 	var err error
 	base := c.Base()
 
@@ -129,7 +126,7 @@ func newServer(c config.HTTPConfig) (*Server, error) {
 // prepareServer configures and prepares an HTTP server with provided configuration, logger, handler, and options.
 // It returns the configured serverOptions or an error on failure.
 func prepareServer(
-	cfg config.HTTPConfig,
+	cfg config.INetwork,
 	log *logger.Logger,
 	opts ...Option,
 ) (*serverOptions, error) {
@@ -234,30 +231,16 @@ func (h *serverOptions) listen(top context.Context) error {
 	ctx, cancel := context.WithCancelCause(top)
 	defer cancel(context.Canceled)
 
-	var wg sync.WaitGroup
-	wg.Add(1)
-	context.AfterFunc(ctx, func() { // shutdown http.Server
-		defer wg.Done()
-
+	defer internal.LazyGracefulShutdown(ctx, h.base.ShutdownTimeout, func(ctx context.Context) {
 		h.InfoContext(ctx, "try to graceful shutdown",
 			logger.String("name", h.name))
 
-		timeout := h.base.ShutdownTimeout
-		if timeout <= 0 {
-			timeout = defaultTimeout
-		}
-
-		out, done := context.WithTimeout(context.Background(), timeout)
-		defer done()
-
-		if errStop := h.Shutdown(out); errStop != nil {
+		if errStop := h.Shutdown(ctx); errStop != nil {
 			h.ErrorContext(ctx, "something went wrong",
 				logger.String("name", h.name),
 				logger.Err(errors.Join(ErrHTTPShutdownServer, errStop, context.Cause(ctx))))
 		}
-	})
-
-	defer wg.Wait()
+	})()
 
 	if err = h.serve(lis); err != nil && !errors.Is(err, ErrServerClosed) {
 		cancel(err)

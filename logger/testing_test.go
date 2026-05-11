@@ -2,6 +2,7 @@ package logger
 
 import (
 	"context"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
@@ -26,6 +27,23 @@ func (t *stubTB) Context() context.Context {
 	return ctx
 }
 
+type canceledTB struct {
+	testing.TB
+
+	ctx          context.Context
+	outputCalled bool
+}
+
+func (t *canceledTB) Helper() {}
+
+func (t *canceledTB) Context() context.Context { return t.ctx }
+
+func (t *canceledTB) Output() io.Writer {
+	t.outputCalled = true
+
+	return io.Discard
+}
+
 func Test_ForTest(t *testing.T) {
 	tb := &stubTB{TB: t}
 	tb.Test(t)
@@ -35,6 +53,19 @@ func Test_ForTest(t *testing.T) {
 
 	log := ForTests(TestLoggerWriteToTB(tb))
 	log.Info("hello world")
+}
+
+func TestTBWriterSkipsCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	tb := &canceledTB{ctx: ctx}
+	data := []byte("ignored log line")
+
+	n, err := (&tbWriter{TB: tb}).Write(data)
+	require.NoError(t, err)
+	require.Equal(t, len(data), n)
+	require.False(t, tb.outputCalled)
 }
 
 func Test_syncBuffer(t *testing.T) {

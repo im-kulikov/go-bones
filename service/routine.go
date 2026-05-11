@@ -8,18 +8,18 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/im-kulikov/go-bones/internal"
 	"github.com/im-kulikov/go-bones/logger"
 )
 
 type settings struct {
-	ignore   error
-	handle   []Service
-	signal   []os.Signal
-	logger   *logger.Logger
-	shutdown time.Duration
+	ignore    error
+	handle    []Service
+	signal    []os.Signal
+	logger    *logger.Logger
+	shutdown  time.Duration
+	newSignal func(context.Context, ...os.Signal) (context.Context, context.CancelCauseFunc, handler)
 }
-
-const defaultShutdownTimeout = time.Second * 15
 
 // Service represents a long-running component managed by Run or RunContext.
 type Service interface {
@@ -97,18 +97,14 @@ func Run(log *logger.Logger, options ...Option) error {
 // Returns:
 //   - error: An error if any of the managed goroutines fail to start or stop properly.
 func RunContext(top context.Context, log *logger.Logger, options ...Option) error {
-	l := logger.Named(log, "go-bones", "service")
-
-	cfg := settings{logger: l, signal: defaultSignals, ignore: errors.Join(defaultIgnoredErrors...)}
-	for _, option := range options {
-		option(&cfg)
-	}
+	cfg := newSettings(log, options...)
+	l := cfg.logger
 
 	if len(cfg.handle) == 0 {
 		return nil
 	}
 
-	ctx, cancel, handleSignals := signalContextRoutine(top, cfg.signal...)
+	ctx, cancel, handleSignals := cfg.newSignal(top, cfg.signal...)
 
 	var wg sync.WaitGroup
 	for _, service := range cfg.handle {
@@ -129,54 +125,50 @@ func RunContext(top context.Context, log *logger.Logger, options ...Option) erro
 	}
 
 	wg.Go(handleSignals)
-	defer shutdownServices(ctx, l, cfg)
+	defer internal.LazyGracefulShutdown(ctx, cfg.shutdown, func(grace context.Context) {
+		if err := context.Cause(ctx); err != nil && errors.Is(err, ErrOsSignal) {
+			l.InfoContext(ctx, err.Error())
+		}
+
+		l.InfoContext(grace, "shutting down services")
+
+		var shutdown sync.WaitGroup
+		for _, service := range cfg.handle {
+			shutdown.Go(func() {
+				l.InfoContext(grace, "shutting down service",
+					logger.String("service", service.Name()))
+
+				service.Stop(grace)
+			})
+		}
+
+		shutdown.Wait()
+	})()
 
 	wg.Wait()
 	cancel(context.Canceled)
 
-	if err := context.Cause(ctx); err != nil && !containsError(err, cfg.ignore) {
+	return runnableError(ctx, cfg.ignore)
+}
+
+func newSettings(log *logger.Logger, options ...Option) settings {
+	cfg := settings{
+		logger:    logger.Named(log, "go-bones", "service"),
+		signal:    defaultSignals,
+		ignore:    errors.Join(defaultIgnoredErrors...),
+		newSignal: signalContextRoutine,
+	}
+	for _, option := range options {
+		option(&cfg)
+	}
+
+	return cfg
+}
+
+func runnableError(ctx context.Context, ignored error) error {
+	if err := context.Cause(ctx); err != nil && !containsError(err, ignored) {
 		return err
 	}
 
 	return nil
-}
-
-// shutdownServices gracefully shutdown all registered services
-// when the provided context is canceled.
-//
-// It listens for the cancellation signal from the top context, then
-// initiates a shutdown sequence for all services defined in `cfg.handle`.
-// Each service is stopped concurrently while ensuring proper synchronization.
-//
-// Parameters:
-//   - top: The parent context that triggers the shutdown process.
-//   - log: Logger instance used for logging shutdown events.
-//   - cfg: Configuration containing shutdown timeout and service list.
-func shutdownServices(top context.Context, log *logger.Logger, cfg settings) {
-	<-top.Done()
-
-	if err := context.Cause(top); err != nil && errors.Is(err, ErrOsSignal) {
-		log.InfoContext(top, err.Error())
-	}
-
-	timeout := cfg.shutdown
-	if timeout <= 0 {
-		timeout = defaultShutdownTimeout
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	log.InfoContext(ctx, "shutting down services")
-
-	var wg sync.WaitGroup
-	for _, service := range cfg.handle {
-		wg.Go(func() {
-			log.InfoContext(ctx, "shutting down service",
-				logger.String("service", service.Name()))
-			service.Stop(ctx)
-		})
-	}
-
-	wg.Wait()
 }

@@ -2,10 +2,12 @@ package http
 
 import (
 	"encoding/json"
+	"errors"
 	"expvar"
 	"net/http/pprof" // #nosec G108
 	"runtime/debug"
 	rprof "runtime/pprof" // #nosec G108
+	"sync/atomic"
 	"text/template"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -34,6 +36,16 @@ func newOpsRuntimeCollector() prometheus.Collector {
 //
 // nolint:gochecknoglobals
 var buildInfo, _ = debug.ReadBuildInfo()
+
+// registry stores the active Prometheus registry used by OPS handlers.
+//
+//nolint:gochecknoglobals // OPS metrics registry is process-wide by design.
+var registry atomic.Pointer[prometheus.Registry]
+
+// runtimeMetricsRegistered tracks the default runtime collector registration.
+//
+//nolint:gochecknoglobals // Runtime collector registration follows the process-wide OPS registry.
+var runtimeMetricsRegistered atomic.Bool
 
 // versionTpl is a pre-compiled template for displaying version information.
 // The template formats:
@@ -127,6 +139,52 @@ func registerPprofHandlers(mux *ServeMux, base string) {
 	}
 }
 
+// RegisterMetrics registers Prometheus collectors in the active OPS registry.
+func RegisterMetrics(cs ...prometheus.Collector) error {
+	r := getRegistry()
+
+	for _, item := range cs {
+		if err := r.Register(item); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// getRegistry returns the process-wide OPS registry, initializing it on first use.
+func getRegistry() *prometheus.Registry {
+	if r := registry.Load(); r != nil {
+		return r
+	}
+
+	if next := prometheus.NewRegistry(); registry.CompareAndSwap(nil, next) {
+		return next
+	}
+
+	return registry.Load()
+}
+
+// registerRuntimeMetrics installs the default Go runtime collector exactly once.
+func registerRuntimeMetrics() error {
+	if runtimeMetricsRegistered.Load() {
+		return nil
+	}
+
+	err := RegisterMetrics(newOpsRuntimeCollector())
+	if _, ok := errors.AsType[prometheus.AlreadyRegisteredError](err); ok {
+		runtimeMetricsRegistered.Store(true)
+
+		return nil
+	} else if err != nil {
+		return err
+	}
+
+	runtimeMetricsRegistered.Store(true)
+
+	return nil
+}
+
 // NewOPSServer creates an HTTP service exposing monitoring and debugging endpoints.
 // It sets up the following handlers:
 //   - Prometheus metrics endpoint
@@ -144,10 +202,13 @@ func NewOPSServer(cfg config.Ops, log *logger.Logger) (service.Service, error) {
 
 	// OPS intentionally serves Prometheus/runtime diagnostics independently of
 	// any OTEL metrics pipeline, so applications can choose one or both paths.
-	register := prometheus.NewRegistry()
-	register.MustRegister(newOpsRuntimeCollector())
+	if err := registerRuntimeMetrics(); err != nil {
+		return nil, err
+	}
+
+	reg := getRegistry()
 	mux.Handle(cfg.MetricsPath, promhttp.InstrumentMetricHandler(
-		register, promhttp.HandlerFor(register, promhttp.HandlerOpts{}),
+		reg, promhttp.HandlerFor(reg, promhttp.HandlerOpts{}),
 	))
 
 	// prepare exp variables handlers

@@ -15,7 +15,7 @@ func TestSignalContext(t *testing.T) {
 	ctx, stop := SignalContext(t.Context(), syscall.SIGUSR1)
 	defer stop()
 
-	// Simulate sending a signal
+	// Simulate sending a signal.
 	go func() {
 		time.Sleep(100 * time.Millisecond)
 		process, err := os.FindProcess(os.Getpid())
@@ -27,7 +27,7 @@ func TestSignalContext(t *testing.T) {
 	case <-ctx.Done():
 		require.ErrorIs(t, context.Cause(ctx), ErrOsSignal)
 	case <-time.After(1 * time.Second):
-		t.Fatal("timeout waiting for signal context cancellation")
+		assert.FailNow(t, "timeout waiting for signal context cancellation")
 	}
 }
 

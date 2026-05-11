@@ -38,6 +38,21 @@ var requiredOpsRuntimeMetricNames = []string{ //nolint:gochecknoglobals
 	"go_memory_classes_heap_stacks_bytes",
 }
 
+func resetOpsRegistry(t *testing.T) {
+	t.Helper()
+
+	previousRegistry := registry.Load()
+	previousRuntimeMetricsRegistered := runtimeMetricsRegistered.Load()
+
+	registry.Store(nil)
+	runtimeMetricsRegistered.Store(false)
+
+	t.Cleanup(func() {
+		registry.Store(previousRegistry)
+		runtimeMetricsRegistered.Store(previousRuntimeMetricsRegistered)
+	})
+}
+
 func Test_opsRuntimeCollector_ExportsGoRuntimeMetrics(t *testing.T) {
 	register := prometheus.NewRegistry()
 	register.MustRegister(newOpsRuntimeCollector())
@@ -55,6 +70,106 @@ func Test_opsRuntimeCollector_ExportsGoRuntimeMetrics(t *testing.T) {
 	}
 
 	assert.NotContains(t, gotNames, "gm_runtime")
+}
+
+func TestRegisterMetrics(t *testing.T) {
+	resetOpsRegistry(t)
+
+	custom := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "go_bones_ops_custom_metric",
+		Help: "Custom OPS metric for tests.",
+	})
+	custom.Set(42)
+
+	require.NoError(t, RegisterMetrics(custom))
+
+	families, err := getRegistry().Gather()
+	require.NoError(t, err)
+	require.Len(t, families, 1)
+	assert.Equal(t, "go_bones_ops_custom_metric", families[0].GetName())
+	assert.Equal(t, float64(42), families[0].GetMetric()[0].GetGauge().GetValue())
+}
+
+func TestRegisterMetrics_ReturnsCollectorError(t *testing.T) {
+	resetOpsRegistry(t)
+
+	custom := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "go_bones_ops_duplicate_metric",
+		Help: "Duplicate OPS metric for tests.",
+	})
+
+	require.NoError(t, RegisterMetrics(custom))
+	require.Error(t, RegisterMetrics(custom))
+}
+
+func TestGetRegistry_InitializesOnceConcurrently(t *testing.T) {
+	resetOpsRegistry(t)
+
+	const workers = 128
+	start := make(chan struct{})
+	results := make(chan *prometheus.Registry, workers)
+
+	var wait sync.WaitGroup
+	for range workers {
+		wait.Go(func() {
+			<-start
+			results <- getRegistry()
+		})
+	}
+
+	close(start)
+	wait.Wait()
+	close(results)
+
+	got := make(map[*prometheus.Registry]int)
+	for item := range results {
+		require.NotNil(t, item)
+		got[item]++
+	}
+
+	require.Len(t, got, 1)
+}
+
+func TestRegisterRuntimeMetrics_IgnoresAlreadyRegisteredRuntimeCollector(t *testing.T) {
+	resetOpsRegistry(t)
+
+	require.NoError(t, getRegistry().Register(newOpsRuntimeCollector()))
+
+	require.NoError(t, registerRuntimeMetrics())
+	require.True(t, runtimeMetricsRegistered.Load())
+}
+
+func TestNewOPSServer_RegistersRuntimeMetricsOnce(t *testing.T) {
+	resetOpsRegistry(t)
+
+	log := logger.ForTests(logger.TestLoggerWriteToTB(t))
+	var cfg config.Ops
+	require.NoError(t, gonfig.SetDefaults(&cfg))
+
+	_, err := NewOPSServer(cfg, log)
+	require.NoError(t, err)
+
+	_, err = NewOPSServer(cfg, log)
+	require.NoError(t, err)
+}
+
+func TestNewOPSServer_ReturnsRuntimeMetricsRegistrationError(t *testing.T) {
+	resetOpsRegistry(t)
+
+	conflicting := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "go_sched_gomaxprocs_threads",
+		Help: "Conflicting metric descriptor.",
+	})
+	reg := prometheus.NewRegistry()
+	reg.MustRegister(conflicting)
+	registry.Store(reg)
+
+	log := logger.ForTests(logger.TestLoggerWriteToTB(t))
+	var cfg config.Ops
+	require.NoError(t, gonfig.SetDefaults(&cfg))
+
+	_, err := NewOPSServer(cfg, log)
+	require.Error(t, err)
 }
 
 func Test_opsServer(t *testing.T) {
@@ -196,4 +311,34 @@ func Test_opsServer(t *testing.T) {
 
 	cancel()
 	wait.Wait()
+}
+
+func TestGetRegistry_ConcurrentCASLoserPath(t *testing.T) {
+	resetOpsRegistry(t)
+
+	const workers = 4096
+	start := make(chan struct{})
+	results := make(chan *prometheus.Registry, workers)
+
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Go(func() {
+			<-start
+			results <- getRegistry()
+		})
+	}
+
+	close(start)
+	wg.Wait()
+	close(results)
+
+	var first *prometheus.Registry
+	for r := range results {
+		require.NotNil(t, r)
+		if first == nil {
+			first = r
+			continue
+		}
+		require.Same(t, first, r)
+	}
 }
