@@ -61,7 +61,7 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: im-kulikov/go-bones
-          files: coverage.out   # путь к Go coverage
+          files: coverage.out   # path to the Go coverage report
           flags: unittests
           name: codecov-umbrella
           fail_ci_if_error: true

@@ -12,7 +12,8 @@ func (e Error) Error() string { return string(e) }
 //
 // If the last argument is not an error or no arguments are passed, it returns nil.
 //
-// Should be used in tests.
+// Commonly used in tests to assert on the error from a function with multiple
+// return values, but works the same way in production code.
 //
 // Example:
 //

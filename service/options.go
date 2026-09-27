@@ -64,10 +64,6 @@ func (g *settings) append(v Service) {
 // Composed services are unwrapped so their members are started individually.
 func WithService(v ...Service) Option {
 	return func(g *settings) {
-		if v == nil {
-			return
-		}
-
 		for _, service := range v {
 			if svc, ok := service.(composed); ok {
 				for _, item := range svc {

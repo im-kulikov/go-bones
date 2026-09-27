@@ -55,7 +55,7 @@ const ErrPointerExpected bones.Error = "expected a pointer to a struct"
 // Base returns the underlying Network value.
 func (c Network) Base() Network { return c }
 
-// PrepareTLSConfig builds a tls.Config from BaseGRPC.TLSConfig.
+// PrepareTLSConfig builds a tls.Config from Network.TLSConfig.
 func (c Network) PrepareTLSConfig() (*tls.Config, error) {
 	if c.TLSConfig == nil {
 		return nil, ErrTLSDisabled
