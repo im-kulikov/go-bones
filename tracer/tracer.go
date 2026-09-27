@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -117,30 +118,41 @@ func enabled(cfg config.TracerConfig) bool {
 		hasStandardBootstrapConfiguration()
 }
 
-// warnIfInsecureWithRemoteEndpoint logs a warning when cfg.Insecure=true (the
-// package default, meant for local development) would actually be applied to
-// a non-local OTLP endpoint, sending telemetry over an unencrypted connection.
-// It stays silent when a signal-specific or global OTEL_EXPORTER_OTLP_INSECURE
-// env var is set, since that env value - not cfg.Insecure - wins in that case.
+// warnIfInsecureWithRemoteEndpoint logs a warning for every signal where
+// cfg.Insecure=true (the package default, meant for local development) would
+// send telemetry without TLS to a non-local endpoint. The endpoint checked is
+// the one the exporter actually uses: OTEL_EXPORTER_OTLP_[SIGNAL_]ENDPOINT when
+// set, cfg.Endpoint otherwise. A signal is skipped when its
+// OTEL_EXPORTER_OTLP_[SIGNAL_]INSECURE env var is set, since that value - not
+// cfg.Insecure - wins in that case.
 func warnIfInsecureWithRemoteEndpoint(l *logger.Logger, cfg config.TracerConfig) {
-	if !cfg.Insecure || cfg.Endpoint == "" || isLocalEndpoint(cfg.Endpoint) {
+	if !cfg.Insecure {
 		return
 	}
 
 	for _, signal := range [...]string{"traces", "metrics", "logs"} {
-		if shouldApplyInsecureFallback(signal) {
+		endpoint, ok := lookupEndpointEnv(signal)
+		if !ok {
+			endpoint = cfg.Endpoint
+		}
+
+		if shouldApplyInsecureFallback(signal) && !isLocalEndpoint(endpoint) {
 			l.Warn("OTLP insecure fallback is enabled for a non-local endpoint; "+
 				"telemetry will be sent without TLS",
-				logger.String("endpoint", cfg.Endpoint))
-
-			return
+				logger.String("signal", signal),
+				logger.String("endpoint", endpoint))
 		}
 	}
 }
 
+// isLocalEndpoint reports whether endpoint points to the local host. It accepts
+// both host:port (cfg.Endpoint) and URL (OTEL_EXPORTER_OTLP_*_ENDPOINT) forms;
+// an empty endpoint means the exporter default, which is localhost.
 func isLocalEndpoint(endpoint string) bool {
 	host := endpoint
-	if h, _, err := net.SplitHostPort(endpoint); err == nil {
+	if u, err := url.Parse(endpoint); err == nil && u.Host != "" {
+		host = u.Hostname()
+	} else if h, _, errSplit := net.SplitHostPort(endpoint); errSplit == nil {
 		host = h
 	}
 

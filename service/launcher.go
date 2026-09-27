@@ -213,22 +213,13 @@ func (l *launcher) Stop(ctx context.Context) {
 	}
 
 	if !l.halt.Swap(true) {
-		// Check l.started non-blocking first: a plain `select { case
-		// <-l.started: case <-ctx.Done(): }` races the two fairly, so with an
-		// already-canceled ctx (a legitimate "fire and forget" caller
-		// pattern - see network/grpc's shutdown-callback integration test),
-		// Go could pick ctx.Done() over an already-published l.started
-		// roughly half the time, skipping cancel entirely and leaving the
-		// callback to run forever with nothing left to stop it.
-		select {
-		case <-l.started:
-		default:
-			select {
-			case <-l.started:
-			case <-ctx.Done():
-				return
-			}
-		}
+		// Wait for cancel publication unconditionally, even if ctx is already
+		// done: init is claimed, and Start publishes cancel and closes started
+		// right after that, before running any user code, so this never blocks
+		// for long. Returning on ctx.Done() here instead (the "fire and forget"
+		// Stop used by network/grpc passes an already-canceled ctx) would set
+		// halt without canceling, leaving the callback running forever.
+		<-l.started
 
 		cancel := l.cancel.Load()
 		(*cancel)()

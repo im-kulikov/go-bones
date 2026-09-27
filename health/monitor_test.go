@@ -628,3 +628,31 @@ func TestSubscribe_UnsubscribeStopsQueuedDelivery(t *testing.T) {
 		require.EqualValues(t, 1, got.Load(), "queued events are not delivered after unsubscribe")
 	})
 }
+
+// TestStartStopRace runs Stop concurrently with Start. Stop must not return
+// before the check loops started by Start have exited; with -race it also
+// catches WaitGroup.Add racing with Wait.
+func TestStartStopRace(t *testing.T) {
+	for range 200 {
+		m := New(config.Health{}, logger.ForTests())
+
+		var stopped atomic.Bool
+		lateCalls := new(atomic.Int64)
+		require.NoError(t, m.Register("db", CheckerFunc(func(context.Context) error {
+			if stopped.Load() {
+				lateCalls.Add(1)
+			}
+
+			return nil
+		})))
+
+		done := make(chan error, 1)
+		go func() { done <- m.Start(t.Context()) }()
+
+		m.Stop(t.Context())
+		stopped.Store(true)
+		<-done
+
+		require.Zero(t, lateCalls.Load(), "check ran after Stop returned")
+	}
+}

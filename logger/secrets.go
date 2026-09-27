@@ -53,6 +53,12 @@ func (h *secretTransformer) Transform(_ context.Context, original slog.Record) s
 
 // redactAttr recursively masks secret fields, including those nested inside slog.Group values.
 func (h *secretTransformer) redactAttr(attr slog.Attr) slog.Attr {
+	if hide, ok := h.secrets[attr.Key]; ok && hide {
+		attr.Value = slog.StringValue("REDACTED")
+
+		return attr
+	}
+
 	if attr.Value.Kind() == slog.KindGroup {
 		group := attr.Value.Group()
 		out := make([]slog.Attr, len(group))
@@ -60,11 +66,6 @@ func (h *secretTransformer) redactAttr(attr slog.Attr) slog.Attr {
 			out[i] = h.redactAttr(ga)
 		}
 		attr.Value = slog.GroupValue(out...)
-		return attr
-	}
-
-	if hide, ok := h.secrets[attr.Key]; ok && hide {
-		attr.Value = slog.StringValue("REDACTED")
 	}
 
 	return attr

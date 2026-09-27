@@ -194,27 +194,46 @@ func TestInit_InsecureRemoteEndpointWarning(t *testing.T) {
 	cases := []struct {
 		name     string
 		endpoint string
-		setEnv   bool
-		wantWarn bool
+		env      map[string]string
+		wantWarn string // endpoint expected in the warning, empty means no warning
 	}{
 		{
 			name:     "warns on insecure remote endpoint",
 			endpoint: "collector.example.com:4317",
-			wantWarn: true,
+			wantWarn: "collector.example.com:4317",
 		},
-		{name: "no warning for local endpoint", endpoint: "localhost:4317", wantWarn: false},
+		{name: "no warning for local endpoint", endpoint: "localhost:4317"},
 		{
-			name:     "no warning when env overrides the fallback",
+			name:     "no warning when env overrides the insecure fallback",
 			endpoint: "collector.example.com:4317",
-			setEnv:   true,
-			wantWarn: false,
+			env:      map[string]string{envOTELExporterOTLPInsecure: "false"},
+		},
+		{
+			name:     "warns when env endpoint is remote and config endpoint is local",
+			endpoint: "localhost:4317",
+			env: map[string]string{
+				envOTELExporterOTLPEndpoint: "http://collector.example.com:4318",
+			},
+			wantWarn: "http://collector.example.com:4318",
+		},
+		{
+			name: "warns when only one signal endpoint is remote",
+			env: map[string]string{
+				envOTELExporterOTLPTracesEndpoint: "collector.example.com:4317",
+			},
+			wantWarn: "collector.example.com:4317",
+		},
+		{
+			name:     "no warning when env endpoint is local and config endpoint is remote",
+			endpoint: "collector.example.com:4317",
+			env:      map[string]string{envOTELExporterOTLPEndpoint: "http://localhost:4318"},
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.setEnv {
-				t.Setenv(envOTELExporterOTLPInsecure, "false")
+			for key, value := range tc.env {
+				t.Setenv(key, value)
 			}
 
 			buf := logger.NewSyncBuffer()
@@ -228,9 +247,9 @@ func TestInit_InsecureRemoteEndpointWarning(t *testing.T) {
 				Endpoint: tc.endpoint,
 			})
 
-			if tc.wantWarn {
+			if tc.wantWarn != "" {
 				require.Contains(t, buf.String(), "insecure")
-				require.Contains(t, buf.String(), tc.endpoint)
+				require.Contains(t, buf.String(), tc.wantWarn)
 			} else {
 				require.NotContains(t, buf.String(), "insecure")
 			}

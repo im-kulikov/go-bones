@@ -224,10 +224,16 @@ func (m *Monitor) Start(top context.Context) error {
 	m.started, m.running, m.startedAt, m.cancel = true, true, now, cancel
 	regs := m.order
 	m.publishLocked(now)
+	// Add the loops before unlocking: a concurrent Stop takes m.mu next, so its
+	// loops.Wait always sees them and cannot return before they exit.
+	m.loops.Add(len(regs))
 	m.mu.Unlock()
 
 	for _, r := range regs {
-		m.loops.Go(func() { m.loop(ctx, r) })
+		go func() {
+			defer m.loops.Done()
+			m.loop(ctx, r)
+		}()
 	}
 
 	<-ctx.Done()

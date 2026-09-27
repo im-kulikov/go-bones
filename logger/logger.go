@@ -18,6 +18,15 @@ func prepareTransformers(cfg config.Logger, transformers ...slogTransformer) []s
 	// Add a transformer to include context metadata in log records.
 	out = append(out, slogTransformerFunc(contextTransformer))
 
+	// Mask secrets right after context attributes are merged in and before any
+	// exporter (OTel log bridge, span events) sees the record.
+	if len(cfg.Secrets) > 0 {
+		secrets := new(secretTransformer)
+		secrets.apply(cfg.Secrets)
+
+		out = append(out, secrets)
+	}
+
 	// Emit records into OTel Logs when the bridge is enabled process-wide.
 	out = append(out, newOpenTelemetryBridge())
 
@@ -28,14 +37,6 @@ func prepareTransformers(cfg config.Logger, transformers ...slogTransformer) []s
 
 	// Add any additional custom transformers provided by the caller.
 	out = append(out, transformers...)
-
-	// Add a transformer for secret masking if secrets are configured.
-	if len(cfg.Secrets) > 0 {
-		secrets := new(secretTransformer)
-		secrets.apply(cfg.Secrets)
-
-		out = append(out, secrets)
-	}
 
 	return out
 }

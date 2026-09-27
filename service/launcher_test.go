@@ -135,6 +135,49 @@ func Test_Workers(t *testing.T) {
 		require.ErrorIs(t, <-runDone, context.Canceled)
 	})
 
+	t.Run(
+		"should cancel even if stop ctx is already done before cancel publication",
+		func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				wrk := &launcher{
+					name:    "simple",
+					done:    make(chan struct{}),
+					started: make(chan struct{}),
+					logs:    logger.ForTests(),
+				}
+				wrk.init.Store(true) // Start has claimed the launcher, cancel is not published yet
+
+				cancelled := make(chan struct{})
+				var cancel context.CancelFunc = func() {
+					close(cancelled)
+					close(wrk.done)
+				}
+
+				stopCtx, stopCancel := context.WithCancel(t.Context())
+				stopCancel() // fire-and-forget Stop, as network/grpc does
+
+				stopped := make(chan struct{})
+				go func() {
+					wrk.Stop(stopCtx)
+					close(stopped)
+				}()
+
+				synctest.Wait()
+				wrk.cancel.Store(&cancel)
+				close(wrk.started)
+				synctest.Wait()
+
+				select {
+				case <-cancelled:
+				default:
+					t.Fatal("Stop returned without canceling the launcher callback")
+				}
+
+				<-stopped
+			})
+		},
+	)
+
 	t.Run("should cancel even if stop races with cancel publication", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			wrk := &launcher{
@@ -184,24 +227,6 @@ func Test_Workers(t *testing.T) {
 			}
 		})
 	})
-
-	t.Run(
-		"should return when stop context is already done while cancel is unpublished",
-		func(t *testing.T) {
-			wrk := &launcher{
-				name: "simple",
-				done: make(chan struct{}),
-				logs: logger.ForTests(),
-			}
-			wrk.init.Store(true)
-
-			stopCtx, stopCancel := context.WithCancel(t.Context())
-			stopCancel()
-
-			now := time.Now()
-			require.NotPanics(t, func() { wrk.Stop(stopCtx) })
-			require.Less(t, time.Since(now), 10*time.Millisecond)
-		})
 
 	t.Run("should not run shutdown hooks while the callback outlives the grace period, "+
 		"but still run them once it returns", func(t *testing.T) {
