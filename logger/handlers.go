@@ -88,6 +88,7 @@ func (h *wrappedHandler) WithAttrs(attrs []Attr) Handler {
 		conf: h.conf,
 		next: h.next.WithAttrs(h.redactAttrs(attrs)),
 		list: slices.Clone(h.list),
+		name: h.name,
 	}
 }
 
@@ -124,6 +125,7 @@ func (h *wrappedHandler) WithGroup(name string) Handler {
 		conf: h.conf,
 		next: h.next.WithGroup(name),
 		list: slices.Clone(h.list),
+		name: h.name,
 	}
 }
 

@@ -218,11 +218,21 @@ func registerHealthMetrics(reader any) error {
 	}
 
 	err := RegisterMetrics(collector)
-	if _, ok := errors.AsType[prometheus.AlreadyRegisteredError](err); ok {
+	are, ok := errors.AsType[prometheus.AlreadyRegisteredError](err)
+	if !ok {
+		return err
+	}
+
+	if are.ExistingCollector == collector {
 		return nil
 	}
 
-	return err
+	// Another Monitor with the same metric set is registered (e.g. a previous
+	// app instance in this process): replace it, otherwise the new monitor's
+	// metrics would never be exported.
+	getRegistry().Unregister(are.ExistingCollector)
+
+	return RegisterMetrics(collector)
 }
 
 // NewOPSServer creates an HTTP service exposing monitoring and debugging endpoints.

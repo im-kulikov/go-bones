@@ -250,6 +250,26 @@ func TestInit_InsecureRemoteEndpointWarning(t *testing.T) {
 			noLeak:   []string{"s3cr3t", "t0k3n", "user"},
 		},
 		{
+			name: "redacts a hostless endpoint URL",
+			env: map[string]string{
+				envOTELExporterOTLPEndpoint: "https://user:s3cr3t@",
+			},
+			wantWarn: "host=[redacted]",
+			noLeak:   []string{"s3cr3t"},
+		},
+		{
+			name:     "redacts a scheme-less endpoint with a token in userinfo",
+			endpoint: "t0k3n@collector:4317",
+			wantWarn: "host=[redacted]",
+			noLeak:   []string{"t0k3n"},
+		},
+		{
+			name:     "redacts a hostless endpoint with a query token",
+			endpoint: "collector?token=t0k3n",
+			wantWarn: "host=[redacted]",
+			noLeak:   []string{"t0k3n"},
+		},
+		{
 			name:     "no warning when env endpoint is local and config endpoint is remote",
 			endpoint: "collector.example.com:4317",
 			env:      map[string]string{envOTELExporterOTLPEndpoint: "http://localhost:4318"},

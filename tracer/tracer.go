@@ -168,8 +168,16 @@ func endpointHost(endpoint string) string {
 		return u.Hostname()
 	}
 
-	if host, _, err := net.SplitHostPort(endpoint); err == nil {
+	// A scheme-less "token@host:port" splits into host "token@host": never log it.
+	host, _, err := net.SplitHostPort(endpoint)
+	if err == nil && !strings.ContainsAny(host, "@?#/") {
 		return host
+	}
+
+	// A bare host ("localhost", "::1") is safe; anything URL-shaped that did
+	// not yield a host may still carry userinfo or query tokens.
+	if strings.ContainsAny(endpoint, "@?#/") {
+		return "[redacted]"
 	}
 
 	return endpoint
@@ -179,7 +187,7 @@ func endpointHost(endpoint string) string {
 // an empty endpoint means the exporter default, which is localhost.
 func isLocalEndpoint(endpoint string) bool {
 	switch endpointHost(endpoint) {
-	case "localhost", "127.0.0.1", "::1", "":
+	case "localhost", "127.0.0.1", "::1", "[::1]", "":
 		return true
 	default:
 		return false

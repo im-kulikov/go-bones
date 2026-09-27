@@ -179,3 +179,14 @@ func TestCollector(t *testing.T) {
 		)
 	})
 }
+
+func TestStaleAfterNotBelowInterval(t *testing.T) {
+	r := &registration{interval: time.Minute, timeout: time.Second}
+	if got := r.staleAfter(30 * time.Second); got <= r.interval+r.timeout {
+		t.Fatalf("stale window %s undercuts interval %s", got, r.interval)
+	}
+
+	if got := r.staleAfter(10 * time.Minute); got != 10*time.Minute {
+		t.Fatalf("longer StaleAfter must be kept, got %s", got)
+	}
+}

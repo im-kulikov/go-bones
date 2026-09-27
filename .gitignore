@@ -27,3 +27,4 @@ coverage.txt
 /bin
 cmd/example
 _artifacts
+.claude/settings.local.json

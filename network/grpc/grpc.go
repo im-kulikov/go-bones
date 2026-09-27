@@ -98,8 +98,8 @@ func WithOpenTelemetry() Option {
 // The returned service is backed by service.NewLauncher:
 //   - Start opens the listener and blocks in grpc.Server.Serve.
 //   - Context cancellation triggers graceful shutdown from listen.
-//   - Stop cancels the launcher context, waits for Start to return, and runs
-//     the configured post-shutdown hooks.
+//   - Stop cancels the launcher context and waits for Start to return; the
+//     post-shutdown hooks run from Start once listen has returned.
 func NewServer(
 	cfg config.INetwork,
 	log *logger.Logger,

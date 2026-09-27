@@ -143,7 +143,9 @@ func (r *registration) staleAfter(defaultStale time.Duration) time.Duration {
 	case r.push:
 		return 0
 	case defaultStale > 0:
-		return defaultStale
+		// A global StaleAfter must not undercut this check's own (jittered)
+		// interval, otherwise the check goes stale between every two runs.
+		return max(defaultStale, r.interval+r.interval*jitterPercent/100+r.timeout)
 	default:
 		return 2*r.interval + r.timeout
 	}

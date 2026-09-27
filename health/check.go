@@ -102,10 +102,7 @@ func (m *Monitor) sweep(r *registration, now time.Time) time.Duration {
 	next.Err = ErrStale
 	next.ConsecutiveFailures++
 	next.ConsecutiveSuccesses = 0
-
-	if res.Status != StatusFailing {
-		next.Status = StatusFailing
-	}
+	next.Status = StatusFailing
 
 	m.applyLocked(r, next, now)
 

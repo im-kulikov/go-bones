@@ -42,3 +42,30 @@ func Test_NamedNilUsesDefault(t *testing.T) {
 		Named(nil, "service").Info("hello world")
 	})
 }
+
+func Test_NamedDoesNotAliasParentNames(t *testing.T) {
+	buf := new(bytes.Buffer)
+	base := ForTests(TestLoggerWriter(buf)).Handler().(*wrappedHandler)
+
+	// Spare capacity would let a plain append share the parent's backing array.
+	names := make([]string, 1, 4)
+	names[0] = "parent"
+	parent := &wrappedHandler{conf: base.conf, next: base.next, list: base.list, name: names}
+
+	first := newLogger(parent.Named("first"))
+	newLogger(parent.Named("second"))
+
+	first.Info("hello world")
+	require.Contains(t, buf.String(), "[parent:first] hello world")
+}
+
+func Test_WithAttrsKeepsNames(t *testing.T) {
+	buf := new(bytes.Buffer)
+	log := Named(ForTests(TestLoggerWriter(buf)), "svc")
+
+	log.With("k", "v").Info("with")
+	log.WithGroup("g").Info("group")
+
+	require.Contains(t, buf.String(), "[svc] with")
+	require.Contains(t, buf.String(), "[svc] group")
+}
