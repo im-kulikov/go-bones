@@ -24,9 +24,9 @@ import (
 // serverOptions contains both construction-time configuration and runtime state for
 // the gRPC transport service built by NewServer.
 //
-// The split between prepareServer, listen, and shutdown is intentional:
-// preparation resolves config and builds grpc.Server once, listen owns socket
-// startup, and shutdown serializes graceful termination from all exit paths.
+// The split between prepareServer and listen is intentional: preparation resolves
+// config and builds grpc.Server once, while listen owns socket startup and graceful
+// termination after its context is canceled.
 type serverOptions struct {
 	name string
 	addr string
@@ -38,6 +38,8 @@ type serverOptions struct {
 	log  *logger.Logger
 	opts []ServerOption
 	init []func(*Server)
+
+	health *healthSync
 }
 
 type (
@@ -53,6 +55,10 @@ const (
 
 	// ErrGRPCCheckListener indicates a failure during the initialization of the gRPC listener.
 	ErrGRPCCheckListener bones.Error = "grpc check listener"
+
+	// ErrGRPCHealthRegistered is returned by NewServer when WithHealth is used
+	// and grpc.health.v1.Health is also registered via RegisterServices.
+	ErrGRPCHealthRegistered bones.Error = "grpc health service is already registered"
 )
 
 // ServiceName sets the lifecycle/logging name used by the wrapped service launcher.
@@ -95,11 +101,9 @@ func WithOpenTelemetry() Option {
 //
 // The returned service is backed by service.NewLauncher:
 //   - Start opens the listener and blocks in grpc.Server.Serve.
-//   - Stop triggers graceful shutdown through the launcher's shutdown hook.
-//
-// Shutdown is also wired from the parent context via listen, and both paths are
-// serialized through serverOptions.once. This keeps parent-cancel and explicit Stop
-// behavior aligned without letting grpc.Server shutdown run twice.
+//   - Context cancellation triggers graceful shutdown from listen.
+//   - Stop cancels the launcher context and waits for Start to return; the
+//     post-shutdown hooks run from Start once listen has returned.
 func NewServer(
 	cfg config.INetwork,
 	log *logger.Logger,
@@ -171,6 +175,11 @@ func prepareServer(
 		}
 	}
 
+	// after user callbacks, so every registered service gets a health status
+	if err = options.health.register(options.grpc); err != nil {
+		return nil, err
+	}
+
 	return options, nil
 }
 
@@ -190,6 +199,22 @@ func (h *serverOptions) listen(top context.Context) error {
 		logger.String("service", h.name),
 		logger.String("address", h.address()))
 
+	// Health statuses follow the monitor while the server runs. Deferred first,
+	// so it is released only after the graceful shutdown below has finished.
+	defer h.health.start()()
+
+	// Sequencing below is easy to break by reordering these two defers or
+	// inserting a new one between them:
+	//   1. Something must cancel ctx before listen can return: either the
+	//      parent (top) is canceled, or Serve fails and cancel(err) runs
+	//      below. Either way, LazyGracefulShutdown's watcher goroutine
+	//      (started immediately by the call itself, not by its defer) is
+	//      waiting on exactly that cancellation to run GracefulStop/Stop.
+	//   2. Go defers run LIFO, so the LazyGracefulShutdown wait-func - which
+	//      blocks until that watcher's callback finishes - must run before
+	//      cancel(context.Canceled)'s now-redundant final cancel. That means
+	//      it has to be the defer declared LAST, i.e. below cancel's, not
+	//      above it.
 	ctx, cancel := context.WithCancelCause(top)
 	defer cancel(context.Canceled)
 

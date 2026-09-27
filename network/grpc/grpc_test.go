@@ -10,6 +10,7 @@ import (
 	"math/big"
 	"net"
 	"os"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -19,12 +20,15 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
+	gogrpc "google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/connectivity"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/im-kulikov/go-bones"
@@ -98,6 +102,18 @@ func (s *sleepServer) Sleep(ctx context.Context, _ *emptypb.Empty) (*emptypb.Emp
 
 type sleepService interface {
 	Sleep(context.Context, *emptypb.Empty) (*emptypb.Empty, error)
+}
+
+type blockingSleepServer struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (s blockingSleepServer) Sleep(context.Context, *emptypb.Empty) (*emptypb.Empty, error) {
+	close(s.started)
+	<-s.release
+
+	return new(emptypb.Empty), nil
 }
 
 type fakeServerStream struct {
@@ -373,24 +389,73 @@ func Test_GRPCServer_ReturnsServeError(t *testing.T) {
 	})
 }
 
-// func Test_GRPCServer_ForceStop_SkipsAfterGracefulCompletion(t *testing.T) {
-// 	log := logger.ForTests(logger.TestLoggerWriteToTB(t))
-//
-// 	srv, err := prepareServer(customGRPCSettings{Address: "127.0.0.1:0"}, log)
-// 	require.NoError(t, err)
-//
-// 	stopDone := make(chan struct{})
-// 	close(stopDone)
-//
-// 	require.NotPanics(t, func() { srv.forceStop(stopDone) })
-// }
-//
-// func Test_GRPCServer_ForceStop_StopsWhenGracefulShutdownStillRunning(t *testing.T) {
-// 	log := logger.ForTests(logger.TestLoggerWriteToTB(t))
-//
-// 	srv, err := prepareServer(customGRPCSettings{Address: "127.0.0.1:0"}, log)
-// 	require.NoError(t, err)
-//
-// 	stopDone := make(chan struct{})
-// 	require.NotPanics(t, func() { srv.forceStop(stopDone) })
-// }
+func TestGRPCServer_GracefulShutdown_WithInMemoryTransport(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		listener := bufconn.Listen(1024 * 1024)
+		service := blockingSleepServer{
+			started: make(chan struct{}),
+			release: make(chan struct{}),
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+
+		cfg := customGRPCSettings{Address: "bufconn"}
+		srv, err := NewServer(
+			cfg,
+			logger.ForTests(logger.TestLoggerWriteToTB(t)),
+			func(options *serverOptions) { options.open = &fakeOpener{lis: listener} },
+			RegisterServices(func(server *Server) {
+				server.RegisterService(&sleepServiceDesc, service)
+			}),
+		)
+		require.NoError(t, err)
+
+		runDone := make(chan error, 1)
+		go func() { runDone <- srv.Start(ctx) }()
+
+		conn, err := NewClient(
+			"passthrough:///bufconn",
+			WithTransportCredentials(insecure.NewCredentials()),
+			gogrpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+				return listener.DialContext(ctx)
+			}),
+		)
+		require.NoError(t, err)
+		// Failure-path cleanup: FailNow must not leave bubble goroutines blocked.
+		defer func() { _ = conn.Close() }()
+
+		var releaseOnce sync.Once
+		release := func() { releaseOnce.Do(func() { close(service.release) }) }
+		defer release()
+
+		callDone := make(chan error, 1)
+		go func() {
+			callDone <- conn.Invoke(t.Context(), "/test.SleepService/Sleep", new(emptypb.Empty), new(emptypb.Empty))
+		}()
+
+		<-service.started
+		cancel()
+		synctest.Wait()
+
+		// GracefulStop must keep the server running until the active RPC is released.
+		select {
+		case errRun := <-runDone:
+			require.Failf(
+				t,
+				"server stopped too early",
+				"before the active RPC was released: %v",
+				errRun,
+			)
+		case errCall := <-callDone:
+			require.Failf(t, "RPC finished too early", "before it was released: %v", errCall)
+		default:
+		}
+
+		release()
+
+		require.NoError(t, <-callDone)
+		require.NoError(t, conn.Close())
+		synctest.Wait()
+		require.NoError(t, <-runDone)
+	})
+}

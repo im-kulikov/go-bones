@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/im-kulikov/go-bones/health"
 	"github.com/im-kulikov/go-bones/internal"
 	"github.com/im-kulikov/go-bones/logger"
 )
@@ -19,9 +20,19 @@ type settings struct {
 	logger    *logger.Logger
 	shutdown  time.Duration
 	newSignal func(context.Context, ...os.Signal) (context.Context, context.CancelCauseFunc, handler)
+
+	// health integration, see WithHealth, WithDrainDelay and WithShutdownLast
+	health     *health.Monitor
+	drainDelay time.Duration
+	last       []Service
+	phased     bool
+	notify     func(...os.Signal) (<-chan os.Signal, func())
+	errs       []error
 }
 
 // Service represents a long-running component managed by Run or RunContext.
+// Start reports terminal runtime errors to the runner. Stop performs best-effort
+// cleanup and is responsible for reporting its own shutdown failures.
 type Service interface {
 	Name() string
 	Start(context.Context) error
@@ -46,11 +57,19 @@ var (
 	defaultSignals = []os.Signal{syscall.SIGINT, syscall.SIGTERM}
 )
 
+// containsError reports whether err matches any of errs (via errors.Is), or
+// matches something wrapped by a composite errs entry such as an
+// errors.Join result - hence the recursion into Unwrap() []error.
+//
+// This used to also start with `if errors.Is(errors.Join(errs...), err) {
+// return true }`. That check asks whether err itself is found within the
+// errs values' own chain (errs wraps err) - the opposite direction from
+// what every call site actually needs (err wraps/matches one of errs) - so
+// it was genuinely dead: every case it caught, the loop below already
+// caught via errors.Is(err, e) (which is also true whenever e == err).
+// Confirmed by re-running Test_defaultErrorsIgnore, Test_groupErrors, and
+// TestRunContext_* with it removed before deleting it.
 func containsError(err error, errs ...error) bool {
-	if errors.Is(errors.Join(errs...), err) {
-		return true
-	}
-
 	for _, e := range errs {
 		if errors.Is(err, e) {
 			return true
@@ -78,7 +97,8 @@ func containsError(err error, errs ...error) bool {
 //   - options: Optional configuration parameters.
 //
 // Returns:
-//   - `error`: An error if any of the managed goroutines fail to start or stop properly.
+//   - `error`: The combined (via errors.Join) non-ignored errors returned by every
+//     managed service's Start method, or nil if none failed.
 func Run(log *logger.Logger, options ...Option) error {
 	return RunContext(context.Background(), log, options...)
 }
@@ -94,26 +114,54 @@ func Run(log *logger.Logger, options ...Option) error {
 //   - log: Logger instance used for logging events and errors.
 //   - options: Optional configuration parameters.
 //
+// With WithHealth, WithDrainDelay or WithShutdownLast the shutdown is phased:
+// the health monitor is drained first, then (on SIGINT/SIGTERM) Run waits
+// DrainDelay, then regular services are canceled and stopped, and only then the
+// "last" services (the monitor and anything passed to WithShutdownLast).
+// Health registration errors are returned before any service is started.
+//
 // Returns:
-//   - error: An error if any of the managed goroutines fail to start or stop properly.
+//   - error: The combined (via errors.Join) non-ignored errors returned by every
+//     managed service's Start method, or nil if none failed. context.CancelCauseFunc
+//     only remembers the first cause it's given, so this is tracked separately from
+//     ctx's cancellation cause: if two services fail around the same time, both of
+//     their errors are reported, not just whichever one's cancel call won the race.
 func RunContext(top context.Context, log *logger.Logger, options ...Option) error {
 	cfg := newSettings(log, options...)
-	l := cfg.logger
+	cfg.prepareHealth()
+
+	if err := errors.Join(cfg.errs...); err != nil {
+		return err
+	}
 
 	if len(cfg.handle) == 0 {
 		return nil
 	}
 
-	ctx, cancel, handleSignals := cfg.newSignal(top, cfg.signal...)
+	if cfg.phased {
+		return cfg.phasedRun(top)
+	}
+
+	return cfg.run(top)
+}
+
+// run is the classic flow: services receive the signal context directly and
+// are stopped concurrently once it is canceled.
+func (g *settings) run(top context.Context) error {
+	l := g.logger
+	ctx, cancel, handleSignals := g.newSignal(top, g.signal...)
+
+	errs := make([]error, len(g.handle))
 
 	var wg sync.WaitGroup
-	for _, service := range cfg.handle {
+	for i, service := range g.handle {
 		wg.Go(func() {
 			defer cancel(nil)
 
 			l.Info("starting service", logger.String("service", service.Name()))
 			err := service.Start(ctx)
-			if err != nil && !containsError(err, cfg.ignore) {
+			if err != nil && !containsError(err, g.ignore) {
+				errs[i] = err
 				cancel(err)
 
 				l.Error("could not start service",
@@ -125,7 +173,7 @@ func RunContext(top context.Context, log *logger.Logger, options ...Option) erro
 	}
 
 	wg.Go(handleSignals)
-	defer internal.LazyGracefulShutdown(ctx, cfg.shutdown, func(grace context.Context) {
+	defer internal.LazyGracefulShutdown(ctx, g.shutdown, func(grace context.Context) {
 		if err := context.Cause(ctx); err != nil && errors.Is(err, ErrOsSignal) {
 			l.InfoContext(ctx, err.Error())
 		}
@@ -133,7 +181,7 @@ func RunContext(top context.Context, log *logger.Logger, options ...Option) erro
 		l.InfoContext(grace, "shutting down services")
 
 		var shutdown sync.WaitGroup
-		for _, service := range cfg.handle {
+		for _, service := range g.handle {
 			shutdown.Go(func() {
 				l.InfoContext(grace, "shutting down service",
 					logger.String("service", service.Name()))
@@ -148,7 +196,20 @@ func RunContext(top context.Context, log *logger.Logger, options ...Option) erro
 	wg.Wait()
 	cancel(context.Canceled)
 
-	return runnableError(ctx, cfg.ignore)
+	return g.result(top, errs)
+}
+
+// result joins the service errors with the cancellation cause of top, unless
+// that cause is ignored or already reported by a service: a caller that cancels
+// RunContext with its own cause gets it back.
+func (g *settings) result(top context.Context, errs []error) error {
+	err := errors.Join(errs...)
+	if cause := context.Cause(top); cause != nil &&
+		!containsError(cause, g.ignore) && !errors.Is(err, cause) {
+		err = errors.Join(err, cause)
+	}
+
+	return err
 }
 
 func newSettings(log *logger.Logger, options ...Option) settings {
@@ -157,18 +218,11 @@ func newSettings(log *logger.Logger, options ...Option) settings {
 		signal:    defaultSignals,
 		ignore:    errors.Join(defaultIgnoredErrors...),
 		newSignal: signalContextRoutine,
+		notify:    notifySignals,
 	}
 	for _, option := range options {
 		option(&cfg)
 	}
 
 	return cfg
-}
-
-func runnableError(ctx context.Context, ignored error) error {
-	if err := context.Cause(ctx); err != nil && !containsError(err, ignored) {
-		return err
-	}
-
-	return nil
 }

@@ -15,18 +15,23 @@ import "github.com/im-kulikov/go-bones/config"
 func prepareTransformers(cfg config.Logger, transformers ...slogTransformer) []slogTransformer {
 	var out []slogTransformer
 
-	// Add a transformer for secret masking if secrets are configured.
+	// Add a transformer to include context metadata in log records.
+	out = append(out, slogTransformerFunc(contextTransformer))
+
+	// Mask secrets right after context attributes are merged in and before any
+	// exporter (OTel log bridge, span events) sees the record.
+	var secrets *secretTransformer
 	if len(cfg.Secrets) > 0 {
-		secrets := new(secretTransformer)
+		secrets = new(secretTransformer)
 		secrets.apply(cfg.Secrets)
 
 		out = append(out, secrets)
 	}
 
-	// Add a transformer to include context metadata in log records.
-	out = append(out, slogTransformerFunc(contextTransformer))
-
 	// Emit records into OTel Logs when the bridge is enabled process-wide.
+	// Exporters emit the record as it is at this step, so attributes added by the
+	// custom transformers below are never exported to OTel (masked or not).
+	// See .github/instructions/logger.instructions.md.
 	out = append(out, newOpenTelemetryBridge())
 
 	// Add an OpenTracing transformer if tracing is enabled.
@@ -36,6 +41,12 @@ func prepareTransformers(cfg config.Logger, transformers ...slogTransformer) []s
 
 	// Add any additional custom transformers provided by the caller.
 	out = append(out, transformers...)
+
+	// Custom transformers run after the mask above and may add attributes of
+	// their own, so mask once more for the final handler.
+	if secrets != nil && len(transformers) > 0 {
+		out = append(out, secrets)
+	}
 
 	return out
 }

@@ -11,8 +11,8 @@ import (
 	"unsafe"
 
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/attribute"
 	otellog "go.opentelemetry.io/otel/log"
-	otelembedded "go.opentelemetry.io/otel/log/embedded"
 	logglobal "go.opentelemetry.io/otel/log/global"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -37,20 +37,35 @@ type (
 	stubLogValuer string
 )
 
-type fakeOTelLogger struct {
-	otelembedded.Logger
+// stubStringerError implements both fmt.Stringer and error with deliberately
+// different text, to prove which one anyToOTelValue actually prefers.
+type stubStringerError struct{}
 
-	enabled bool
-	emitted int
+func (stubStringerError) String() string { return "stringer text" }
+func (stubStringerError) Error() string  { return "error text" }
+
+func installOTelLogProvider(
+	t *testing.T,
+	processor sdklog.Processor,
+) {
+	t.Helper()
+
+	prev := logglobal.GetLoggerProvider()
+	provider := sdklog.NewLoggerProvider(
+		sdklog.WithProcessor(processor),
+	)
+	logglobal.SetLoggerProvider(provider)
+
+	t.Cleanup(func() {
+		SetOpenTelemetryBridge(false)
+		logglobal.SetLoggerProvider(prev)
+		_ = provider.Shutdown(context.Background())
+	})
 }
 
 func (s stubStringer) String() string { return string(s) }
 func (s stubLogValuer) LogValue() slog.Value {
 	return slog.StringValue(string(s))
-}
-func (f *fakeOTelLogger) Emit(context.Context, otellog.Record) { f.emitted++ }
-func (f *fakeOTelLogger) Enabled(context.Context, otellog.EnabledParameters) bool {
-	return f.enabled
 }
 
 func (p *captureProcessor) OnEmit(_ context.Context, record *sdklog.Record) error {
@@ -62,8 +77,8 @@ func (p *captureProcessor) OnEmit(_ context.Context, record *sdklog.Record) erro
 		Attributes:   make(map[string]any, record.AttributesLen()),
 	}
 
-	record.WalkAttributes(func(attr otellog.KeyValue) bool {
-		item.Attributes[attr.Key] = otelValue(attr.Value)
+	record.WalkAttributes(func(attr attribute.KeyValue) bool {
+		item.Attributes[string(attr.Key)] = otelValue(attr.Value)
 		return true
 	})
 
@@ -76,7 +91,13 @@ func (*captureProcessor) Enabled(context.Context, sdklog.EnabledParameters) bool
 func (*captureProcessor) Shutdown(context.Context) error                         { return nil }
 func (*captureProcessor) ForceFlush(context.Context) error                       { return nil }
 
-func otelValue(value otellog.Value) any {
+type disabledCaptureProcessor struct{ captureProcessor }
+
+func (*disabledCaptureProcessor) Enabled(context.Context, sdklog.EnabledParameters) bool {
+	return false
+}
+
+func otelValue(value attribute.Value) any {
 	if out, ok := scalarOTelValue(value); ok {
 		return out
 	}
@@ -88,26 +109,26 @@ func otelValue(value otellog.Value) any {
 	return nil
 }
 
-func scalarOTelValue(value otellog.Value) (any, bool) {
-	switch value.Kind() {
-	case otellog.KindString:
+func scalarOTelValue(value attribute.Value) (any, bool) {
+	switch value.Type() {
+	case attribute.STRING:
 		return value.AsString(), true
-	case otellog.KindInt64:
+	case attribute.INT64:
 		return value.AsInt64(), true
-	case otellog.KindFloat64:
+	case attribute.FLOAT64:
 		return value.AsFloat64(), true
-	case otellog.KindBool:
+	case attribute.BOOL:
 		return value.AsBool(), true
-	case otellog.KindBytes:
-		return value.AsBytes(), true
+	case attribute.BYTESLICE:
+		return value.AsByteSlice(), true
 	default:
 		return nil, false
 	}
 }
 
-func compositeOTelValue(value otellog.Value) (any, bool) {
-	switch value.Kind() {
-	case otellog.KindSlice:
+func compositeOTelValue(value attribute.Value) (any, bool) {
+	switch value.Type() {
+	case attribute.SLICE:
 		items := value.AsSlice()
 		out := make([]any, 0, len(items))
 		for _, item := range items {
@@ -115,11 +136,11 @@ func compositeOTelValue(value otellog.Value) (any, bool) {
 		}
 
 		return out, true
-	case otellog.KindMap:
+	case attribute.MAP:
 		items := value.AsMap()
 		out := make(map[string]any, len(items))
 		for _, item := range items {
-			out[item.Key] = otelValue(item.Value)
+			out[string(item.Key)] = otelValue(item.Value)
 		}
 
 		return out, true
@@ -129,11 +150,8 @@ func compositeOTelValue(value otellog.Value) (any, bool) {
 }
 
 func TestOpenTelemetryBridge(t *testing.T) {
-	defer SetOpenTelemetryBridge(false)
-
 	processor := new(captureProcessor)
-	logProvider := sdklog.NewLoggerProvider(sdklog.WithProcessor(processor))
-	logglobal.SetLoggerProvider(logProvider)
+	installOTelLogProvider(t, processor)
 	SetOpenTelemetryBridge(true)
 
 	spanRecorder := tracetest.NewSpanRecorder()
@@ -141,6 +159,7 @@ func TestOpenTelemetryBridge(t *testing.T) {
 		sdktrace.WithSpanProcessor(spanRecorder),
 		sdktrace.WithIDGenerator(stubIDGenerator(1)),
 	)
+	t.Cleanup(func() { _ = traceProvider.Shutdown(context.Background()) })
 	tracer := traceProvider.Tracer("test")
 
 	ctx, span := tracer.Start(context.Background(), "main")
@@ -176,11 +195,8 @@ func TestOpenTelemetryBridge(t *testing.T) {
 }
 
 func TestOpenTelemetryBridgeDisabled(t *testing.T) {
-	defer SetOpenTelemetryBridge(false)
-
 	processor := new(captureProcessor)
-	logProvider := sdklog.NewLoggerProvider(sdklog.WithProcessor(processor))
-	logglobal.SetLoggerProvider(logProvider)
+	installOTelLogProvider(t, processor)
 	SetOpenTelemetryBridge(false)
 
 	log := ForTests()
@@ -189,63 +205,50 @@ func TestOpenTelemetryBridgeDisabled(t *testing.T) {
 	require.Empty(t, processor.records)
 }
 
-func TestOpenTelemetryBridgeTransformSkipsWhenBridgeDisabled(t *testing.T) {
-	defer SetOpenTelemetryBridge(false)
+// TestOpenTelemetryTransformer_EmitsOnlyWhenEnabled covers the two independent
+// gates in Transform: the process-wide bridge toggle, and the OTel logger's
+// own Enabled() check. Either being off must skip emission without altering
+// the record; both being on must emit exactly once.
+func TestOpenTelemetryTransformer_EmitsOnlyWhenEnabled(t *testing.T) {
+	cases := []struct {
+		name        string
+		bridgeOn    bool
+		loggerOff   bool
+		wantEmitted bool
+	}{
+		{name: "bridge disabled", bridgeOn: false, wantEmitted: false},
+		{name: "otel logger disabled", bridgeOn: true, loggerOff: true, wantEmitted: false},
+		{name: "bridge and logger enabled", bridgeOn: true, wantEmitted: true},
+	}
 
-	prev := globalOpenTelemetryLogger
-	defer func() { globalOpenTelemetryLogger = prev }()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cp := new(captureProcessor)
 
-	fake := &fakeOTelLogger{enabled: true}
-	globalOpenTelemetryLogger = fake
-	SetOpenTelemetryBridge(false)
+			var processor sdklog.Processor = cp
+			if tc.loggerOff {
+				processor = &disabledCaptureProcessor{captureProcessor: *cp}
+			}
 
-	var record slog.Record
-	record.Message = "skipped"
-	record.Level = slog.LevelInfo
+			installOTelLogProvider(t, processor)
+			SetOpenTelemetryBridge(tc.bridgeOn)
 
-	out := newOpenTelemetryBridge().Transform(context.Background(), record)
+			var record slog.Record
+			record.Message = "hello"
+			record.Level = slog.LevelInfo
 
-	require.Equal(t, record.Message, out.Message)
-	require.Equal(t, record.Level, out.Level)
-	require.Zero(t, fake.emitted)
-}
+			out := newOpenTelemetryBridge().Transform(context.Background(), record)
 
-func TestOpenTelemetryBridgeLoggerDisabled(t *testing.T) {
-	defer SetOpenTelemetryBridge(false)
+			require.Equal(t, record.Message, out.Message)
+			require.Equal(t, record.Level, out.Level)
 
-	prev := globalOpenTelemetryLogger
-	defer func() { globalOpenTelemetryLogger = prev }()
-
-	globalOpenTelemetryLogger = &fakeOTelLogger{enabled: false}
-	SetOpenTelemetryBridge(true)
-
-	var record slog.Record
-	record.Message = "disabled"
-	record.Level = slog.LevelInfo
-
-	out := newOpenTelemetryBridge().Transform(context.Background(), record)
-
-	require.Equal(t, record.Message, out.Message)
-	require.Equal(t, record.Level, out.Level)
-}
-
-func TestOpenTelemetryBridgeLoggerEnabled(t *testing.T) {
-	defer SetOpenTelemetryBridge(false)
-
-	prev := globalOpenTelemetryLogger
-	defer func() { globalOpenTelemetryLogger = prev }()
-
-	fake := &fakeOTelLogger{enabled: true}
-	globalOpenTelemetryLogger = fake
-	SetOpenTelemetryBridge(true)
-
-	var record slog.Record
-	record.Message = "enabled"
-	record.Level = slog.LevelInfo
-
-	newOpenTelemetryBridge().Transform(context.Background(), record)
-
-	require.Equal(t, 1, fake.emitted)
+			if tc.wantEmitted {
+				require.Len(t, cp.records, 1)
+			} else {
+				require.Empty(t, cp.records)
+			}
+		})
+	}
 }
 
 func TestRecordError(t *testing.T) {
@@ -266,6 +269,31 @@ func TestRecordError(t *testing.T) {
 		_, ok := recordError(record)
 
 		require.False(t, ok)
+	})
+}
+
+func TestToOTelRecord_ErrAttr(t *testing.T) {
+	t.Run("preserves the original error and its Unwrap chain", func(t *testing.T) {
+		sentinel := fmt.Errorf("boom: %w", context.Canceled)
+
+		var record slog.Record
+		record.Add(Err(sentinel))
+
+		out := toOTelRecord(context.Background(), record)
+
+		require.Same(t, sentinel, out.Err(), //nolint:testifylint
+			"SetErr must be given the original error, not a message-only rebuild")
+		require.ErrorIs(t, out.Err(), context.Canceled,
+			"the original error's Unwrap chain must survive into the OTel record")
+	})
+
+	t.Run("falls back to a synthesized error for a non-error value", func(t *testing.T) {
+		var record slog.Record
+		record.Add(String(defaultErrorKey, "boom")) // bypasses Err/NamedError on purpose
+
+		out := toOTelRecord(context.Background(), record)
+
+		require.EqualError(t, out.Err(), "boom")
 	})
 }
 
@@ -352,6 +380,8 @@ func TestAnyToOTelValue(t *testing.T) {
 	require.Equal(t, "boom", otelValue(anyToOTelValue(fmt.Errorf("boom"))))
 	require.Equal(t, []any{"x", "2"}, otelValue(anyToOTelValue([]any{"x", 2})))
 	require.Equal(t, "123", otelValue(anyToOTelValue(123)))
+	require.Equal(t, "error text", otelValue(anyToOTelValue(stubStringerError{})),
+		"error takes precedence over fmt.Stringer when a type implements both")
 }
 
 func TestToOTelValueFallback(t *testing.T) {

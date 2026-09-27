@@ -38,3 +38,73 @@ func Test_OpsSettings(t *testing.T) {
 	_, err = cfg.PrepareTLSConfig()
 	require.NoError(t, err)
 }
+
+func TestOps_IsEnabled(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  Ops
+		want bool
+	}{
+		{
+			name: "disabled",
+			cfg: Ops{
+				Enabled:        false,
+				MetricsEnabled: true,
+			},
+			want: false,
+		},
+		{
+			name: "enabled_without_endpoints",
+			cfg: Ops{
+				Enabled: true,
+			},
+			want: false,
+		},
+		{
+			name: "metrics_enabled",
+			cfg: Ops{
+				Enabled:        true,
+				MetricsEnabled: true,
+			},
+			want: true,
+		},
+		{
+			name: "profile_enabled",
+			cfg: Ops{
+				Enabled:        true,
+				ProfileEnabled: true,
+			},
+			want: true,
+		},
+		{
+			name: "exp_vars_enabled",
+			cfg: Ops{
+				Enabled:        true,
+				ExpVarsEnabled: true,
+			},
+			want: true,
+		},
+		{
+			name: "version_enabled",
+			cfg: Ops{
+				Enabled:        true,
+				VersionEnabled: true,
+			},
+			want: true,
+		},
+		{
+			name: "health_enabled",
+			cfg: Ops{
+				Enabled:       true,
+				HealthEnabled: true,
+			},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, tt.cfg.IsEnabled())
+		})
+	}
+}

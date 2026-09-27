@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"expvar"
+	"fmt"
 	"net/http/pprof" // #nosec G108
 	"runtime/debug"
 	rprof "runtime/pprof" // #nosec G108
@@ -14,6 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/im-kulikov/go-bones"
 	"github.com/im-kulikov/go-bones/config"
 	"github.com/im-kulikov/go-bones/logger"
 	"github.com/im-kulikov/go-bones/service"
@@ -112,16 +114,24 @@ BuildInfo is empty
 //
 // Usage: Typically mounted on routes like "/version" or "/debug/version"
 // for health checks, deployment verification, and operational monitoring.
-func version(w ResponseWriter, r *Request) {
-	switch r.URL.Query().Get("format") {
-	case "json":
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(StatusOK)
-		_ = json.NewEncoder(w).Encode(buildInfo)
-	default:
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(StatusOK)
-		_ = versionTpl.Execute(w, buildInfo)
+func version(log *logger.Logger) HandlerFunc {
+	return func(w ResponseWriter, r *Request) {
+		switch r.URL.Query().Get("format") {
+		case "json":
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(StatusOK)
+
+			if err := json.NewEncoder(w).Encode(buildInfo); err != nil {
+				log.ErrorContext(r.Context(), "could not write version response", logger.Err(err))
+			}
+		default:
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.WriteHeader(StatusOK)
+
+			if err := versionTpl.Execute(w, buildInfo); err != nil {
+				log.ErrorContext(r.Context(), "could not write version response", logger.Err(err))
+			}
+		}
 	}
 }
 
@@ -152,13 +162,27 @@ func RegisterMetrics(cs ...prometheus.Collector) error {
 	return nil
 }
 
+// ErrOPSRouteConflict is returned by NewOPSServer when two enabled OPS endpoints
+// are configured on conflicting paths.
+const ErrOPSRouteConflict bones.Error = "conflicting OPS endpoint paths"
+
+// registryCompareAndSwap is a seam over registry.CompareAndSwap so a test can
+// deterministically simulate losing the race (another goroutine's CAS
+// winning first), instead of relying on actually scheduling enough
+// concurrent goroutines to make that outcome likely.
+//
+//nolint:gochecknoglobals
+var registryCompareAndSwap = func(next *prometheus.Registry) bool {
+	return registry.CompareAndSwap(nil, next)
+}
+
 // getRegistry returns the process-wide OPS registry, initializing it on first use.
 func getRegistry() *prometheus.Registry {
 	if r := registry.Load(); r != nil {
 		return r
 	}
 
-	if next := prometheus.NewRegistry(); registry.CompareAndSwap(nil, next) {
+	if next := prometheus.NewRegistry(); registryCompareAndSwap(next) {
 		return next
 	}
 
@@ -185,41 +209,67 @@ func registerRuntimeMetrics() error {
 	return nil
 }
 
+// metricsHandler serves the process-wide OPS registry plus, when the health
+// reader is a Prometheus collector, that collector from a registry owned by
+// this OPS server. Health metrics are per server, so they never compete with
+// other servers or user collectors in the shared registry; a name clash with
+// a user metric surfaces as a scrape error instead of silently dropping data.
+func metricsHandler(reader any) (Handler, error) {
+	reg := getRegistry()
+
+	var gatherer prometheus.Gatherer = reg
+	if collector, ok := reader.(prometheus.Collector); ok {
+		own := prometheus.NewRegistry()
+		if err := own.Register(collector); err != nil {
+			return nil, err
+		}
+
+		gatherer = prometheus.Gatherers{reg, own}
+	}
+
+	handler := promhttp.HandlerFor(gatherer, promhttp.HandlerOpts{})
+
+	return promhttp.InstrumentMetricHandler(reg, handler), nil
+}
+
 // NewOPSServer creates an HTTP service exposing monitoring and debugging endpoints.
 // It sets up the following handlers:
+//
 //   - Prometheus metrics endpoint
+//
 //   - Expvar variables endpoint
+//
 //   - `pprof` debugging endpoints (index, cmdline, profile, symbol, trace, and
 //     any named runtime profiles such as goroutine, heap, or goroutineleak when available)
+//
+//   - health probes /livez, /readyz and /healthz (see WithHealth)
 //
 // Parameters:
 //   - cfg: Configuration for the operations server
 //   - log: Logger instance for server operations
+//   - opts: optional OPS settings such as WithHealth
 //
 // Returns a configured HTTP server as a service.Service interface and any error encountered during setup.
-func NewOPSServer(cfg config.Ops, log *logger.Logger) (service.Service, error) {
-	mux := NewServeMux()
-
-	// OPS intentionally serves Prometheus/runtime diagnostics independently of
-	// any OTEL metrics pipeline, so applications can choose one or both paths.
-	if err := registerRuntimeMetrics(); err != nil {
-		return nil, err
+//
+// NewOPSServer returns a nil service and a nil error when the OPS server is
+// disabled: cfg.Enabled is false, or every endpoint switch (MetricsEnabled,
+// ProfileEnabled, ExpVarsEnabled, VersionEnabled, HealthEnabled) is false.
+// The switches default to true only through their struct tags, i.e. when cfg is
+// loaded with gonfig (config.Load / gonfig.SetDefaults). A config.Ops built as a
+// struct literal, such as config.Ops{Address: ":8090"}, therefore yields no OPS
+// server; apply gonfig.SetDefaults first or set the switches explicitly. A nil
+// service is skipped by service.WithService.
+//
+// ErrOPSRouteConflict is returned when two enabled endpoints are configured on
+// conflicting paths, e.g. two health probes on one path or a probe on MetricsPath.
+func NewOPSServer(cfg config.Ops, log *logger.Logger, opts ...OPSOption) (service.Service, error) {
+	if !cfg.IsEnabled() {
+		return nil, nil
 	}
 
-	reg := getRegistry()
-	mux.Handle(cfg.MetricsPath, promhttp.InstrumentMetricHandler(
-		reg, promhttp.HandlerFor(reg, promhttp.HandlerOpts{}),
-	))
-
-	// prepare exp variables handlers
-	mux.Handle(cfg.ExpVarsPath, expvar.Handler())
-
-	// prepare pprof handlers
-	registerPprofHandlers(mux, cfg.ProfilePath)
-
-	// version handler
-	if cfg.VersionEnabled {
-		mux.HandleFunc(cfg.VersionPath, version)
+	handler, err := newOPSHandler(cfg, log, opts...)
+	if err != nil {
+		return nil, err
 	}
 
 	return NewServer(
@@ -227,7 +277,78 @@ func NewOPSServer(cfg config.Ops, log *logger.Logger) (service.Service, error) {
 		log,
 		ServiceName(defaultOPSServiceName),
 		ServerOptions(func(srv *Server) {
-			srv.Handler = mux
+			srv.Handler = handler
 		}),
 	)
+}
+
+// newOPSOptions applies opts, skipping nil ones.
+func newOPSOptions(opts ...OPSOption) opsOptions {
+	var options opsOptions
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&options)
+		}
+	}
+
+	return options
+}
+
+// newOPSHandler builds the OPS endpoint mux independently from HTTP listener
+// lifecycle, so endpoint behavior can be tested without a network socket.
+func newOPSHandler(cfg config.Ops, log *logger.Logger, opts ...OPSOption) (_ Handler, err error) {
+	// ServeMux panics when two patterns conflict, e.g. two probes on one path or
+	// a probe on MetricsPath. The paths come from config, so report that as an
+	// error instead of crashing the process.
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("%w: %v", ErrOPSRouteConflict, r)
+		}
+	}()
+
+	if log == nil {
+		log = logger.Default()
+	}
+
+	options := newOPSOptions(opts...)
+
+	mux := NewServeMux()
+
+	if cfg.MetricsEnabled {
+		// OPS intentionally serves Prometheus/runtime diagnostics independently of
+		// any OTEL metrics pipeline, so applications can choose one or both paths.
+		if err := registerRuntimeMetrics(); err != nil {
+			return nil, err
+		}
+
+		metrics, err := metricsHandler(options.health)
+		if err != nil {
+			return nil, err
+		}
+
+		mux.Handle(cfg.MetricsPath, metrics)
+	}
+
+	// prepare exp variables handlers
+	if cfg.ExpVarsEnabled {
+		mux.Handle(cfg.ExpVarsPath, expvar.Handler())
+	}
+
+	// prepare pprof handlers
+	if cfg.ProfileEnabled {
+		registerPprofHandlers(mux, cfg.ProfilePath)
+	}
+
+	// version handler
+	if cfg.VersionEnabled {
+		mux.HandleFunc(cfg.VersionPath, version(log))
+	}
+
+	// health probes
+	if cfg.HealthEnabled {
+		paths := opsHealthPaths{live: cfg.LivePath, ready: cfg.ReadyPath, health: cfg.HealthPath}
+		registerHealthHandlers(mux, paths.withDefaults(), options.health, log)
+	}
+
+	return mux, nil
 }

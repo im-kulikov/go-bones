@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/im-kulikov/go-bones"
+	"github.com/im-kulikov/go-bones/logger"
 )
 
 // ErrComposedServiceNotRunnable is returned when attempting to start a composed service directly.
@@ -47,7 +48,10 @@ func (g composed) Start(context.Context) error {
 //   - service execution still happens only after helpers unwrap the container.
 //
 // Nil services and disabled services (for types implementing Enabler) are excluded
-// so callers can assemble optional trees without extra filtering code.
+// so callers can assemble optional trees without extra filtering code. A disabled
+// service is logged via the process-wide default logger (see logger.Default), the
+// same as WithService does for a disabled top-level service - Compose has no
+// injected logger of its own to use instead.
 func Compose(services ...Service) Service {
 	out := make(composed, 0, len(services))
 	for _, svc := range services {
@@ -56,6 +60,8 @@ func Compose(services ...Service) Service {
 		}
 
 		if e, ok := svc.(Enabler); ok && !e.Enabled() {
+			logger.Default().Warn("service disabled", logger.String("service", svc.Name()))
+
 			continue
 		}
 

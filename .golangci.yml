@@ -12,11 +12,9 @@ linters:
     - godot
     - prealloc
     - rowserrcheck
-    - unconvert
     - lll
     - cyclop
     - gosec
-    - prealloc
     - gochecknoglobals
     - funlen
   disable: []

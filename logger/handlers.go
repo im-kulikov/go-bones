@@ -86,9 +86,30 @@ func (h *wrappedHandler) Enabled(ctx context.Context, level Level) bool {
 func (h *wrappedHandler) WithAttrs(attrs []Attr) Handler {
 	return &wrappedHandler{
 		conf: h.conf,
-		next: h.next.WithAttrs(attrs),
+		next: h.next.WithAttrs(h.redactAttrs(attrs)),
 		list: slices.Clone(h.list),
+		name: h.name,
 	}
+}
+
+// redactAttrs masks secrets in attributes bound via Logger.With. Such attributes
+// go straight to the next handler and never pass through the transformers list.
+func (h *wrappedHandler) redactAttrs(attrs []Attr) []Attr {
+	for _, item := range h.list {
+		secrets, ok := item.(*secretTransformer)
+		if !ok {
+			continue
+		}
+
+		out := make([]Attr, len(attrs))
+		for i, attr := range attrs {
+			out[i] = secrets.redactAttr(attr)
+		}
+
+		return out
+	}
+
+	return attrs
 }
 
 // WithGroup returns a new wrapped handler appending the specified group name
@@ -104,6 +125,7 @@ func (h *wrappedHandler) WithGroup(name string) Handler {
 		conf: h.conf,
 		next: h.next.WithGroup(name),
 		list: slices.Clone(h.list),
+		name: h.name,
 	}
 }
 
@@ -128,12 +150,16 @@ func (h *wrappedHandler) Handle(ctx context.Context, original Record) error {
 // Named assigns a name-based prefix to the log messages if the handler supports NamedLogger.
 //
 // Parameters:
-//   - log: The logger for which the prefix is to be set.
+//   - log: The logger for which the prefix is to be set. If nil, Default is used.
 //   - name: The name to use as the prefix.
 //
 // Returns:
 //   - A new Logger instance with the prefix applied.
 func Named(log *Logger, name ...string) *Logger {
+	if log == nil {
+		log = Default()
+	}
+
 	if handler, ok := log.Handler().(NamedLogger); ok {
 		return newLogger(handler.Named(name...))
 	}
@@ -162,7 +188,7 @@ func (h *wrappedHandler) Named(names ...string) Handler {
 		conf: h.conf,
 		next: h.next,
 		list: h.list,
-		name: append(h.name, items...),
+		name: append(slices.Clone(h.name), items...),
 	}
 }
 

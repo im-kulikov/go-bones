@@ -1,8 +1,12 @@
 package testutil
 
 import (
+	"context"
+	"errors"
+	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -76,6 +80,94 @@ func TestRequireNetworkIntegration(t *testing.T) {
 
 		require.Equal(t, "network", subject.attrs["integration"])
 	})
+}
+
+func TestFreeTCPAddr(t *testing.T) {
+	addr := FreeTCPAddr(t)
+
+	host, port, err := net.SplitHostPort(addr)
+	require.NoError(t, err)
+	require.Equal(t, "127.0.0.1", host)
+	require.NotEmpty(t, port)
+
+	// The address must be immediately reusable: FreeTCPAddr already closed
+	// its own probe listener before returning it.
+	lis, err := net.Listen("tcp", addr)
+	require.NoError(t, err)
+	require.NoError(t, lis.Close())
+}
+
+// failCloseListener wraps a real listener but reports a failure from Close,
+// while still actually releasing the underlying port so tests don't leak it.
+type failCloseListener struct {
+	net.Listener
+}
+
+func (f failCloseListener) Close() error {
+	_ = f.Listener.Close()
+
+	return errors.New("close failed")
+}
+
+// fatalRecorderTB fakes just enough of testing.TB to observe a Fatalf call
+// without it failing *this* test: a real t.Run subtest would propagate its
+// failure to the parent regardless of what the parent asserts afterward,
+// which is exactly what these tests need to avoid since a Fatalf call here
+// is the expected, correct behavior being verified.
+type fatalRecorderTB struct {
+	testing.TB
+	fataled bool
+}
+
+func (f *fatalRecorderTB) Helper() {}
+func (f *fatalRecorderTB) Fatalf(string, ...any) {
+	f.fataled = true
+	runtime.Goexit()
+}
+
+func TestFreeTCPAddr_ListenFailure(t *testing.T) {
+	prev := listenTCP
+	t.Cleanup(func() { listenTCP = prev })
+
+	listenTCP = func(context.Context) (net.Listener, error) {
+		return nil, errors.New("listen failed")
+	}
+
+	fake := &fatalRecorderTB{TB: t}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		FreeTCPAddr(fake)
+	}()
+	<-done
+
+	require.True(t, fake.fataled, "FreeTCPAddr must call Fatalf when Listen fails")
+}
+
+func TestFreeTCPAddr_CloseFailure(t *testing.T) {
+	prev := listenTCP
+	t.Cleanup(func() { listenTCP = prev })
+
+	listenTCP = func(ctx context.Context) (net.Listener, error) {
+		lis, err := new(net.ListenConfig).Listen(ctx, "tcp", "127.0.0.1:0")
+		if err != nil {
+			return nil, err
+		}
+
+		return failCloseListener{Listener: lis}, nil
+	}
+
+	fake := &fatalRecorderTB{TB: t}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		FreeTCPAddr(fake)
+	}()
+	<-done
+
+	require.True(t, fake.fataled, "FreeTCPAddr must call Fatalf when Close fails")
 }
 
 func TestWriteArtifact(t *testing.T) {

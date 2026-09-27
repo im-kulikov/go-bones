@@ -15,13 +15,11 @@ func TestSignalContext(t *testing.T) {
 	ctx, stop := SignalContext(t.Context(), syscall.SIGUSR1)
 	defer stop()
 
-	// Simulate sending a signal.
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		process, err := os.FindProcess(os.Getpid())
-		assert.NoError(t, err)
-		assert.NoError(t, process.Signal(syscall.SIGUSR1))
-	}()
+	// SignalContext registers the signal handler before returning, so no delay
+	// is needed before exercising the actual process-signal path.
+	process, err := os.FindProcess(os.Getpid())
+	require.NoError(t, err)
+	require.NoError(t, process.Signal(syscall.SIGUSR1))
 
 	select {
 	case <-ctx.Done():

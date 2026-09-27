@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
-	"net"
 	"syscall"
 	"testing"
 	"time"
@@ -18,17 +17,34 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/health"
-	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/im-kulikov/go-bones/config"
+	bonehealth "github.com/im-kulikov/go-bones/health"
 	"github.com/im-kulikov/go-bones/internal/testutil"
 	"github.com/im-kulikov/go-bones/logger"
 	"github.com/im-kulikov/go-bones/service"
 )
+
+// startedMonitor runs a health monitor without checks: it is ready right after
+// Start, so the gRPC health service reports SERVING.
+func startedMonitor(t *testing.T, ctx context.Context) *bonehealth.Monitor {
+	t.Helper()
+
+	hc := bonehealth.New(config.Health{}, logger.ForTests())
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		assert.NoError(t, hc.Start(ctx))
+	}()
+
+	t.Cleanup(func() { <-done })
+
+	return hc
+}
 
 type otelSleepServer struct{ log *logger.Logger }
 
@@ -43,24 +59,20 @@ func Test_GRPCServer_ServesRequests(t *testing.T) {
 	ctx, cancel := service.SignalContext(t.Context(), syscall.SIGTERM)
 	defer cancel()
 
-	lis, err := new(net.ListenConfig).Listen(ctx, "tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	require.NoError(t, lis.Close())
+	addr := testutil.FreeTCPAddr(t)
 
 	log := logger.ForTests(logger.TestLoggerWriteToTB(t))
 	sleep := new(sleepServer)
 	sleep.delay.Store(int64(10 * time.Millisecond))
 
-	cfg := customGRPCSettings{Address: lis.Addr().String()}
+	cfg := customGRPCSettings{Address: addr}
 	srv, err := NewServer(cfg, log,
 		RegisterServices(
 			func(server *Server) {
-				healthServer := health.NewServer()
-				healthServer.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
-				healthpb.RegisterHealthServer(server, healthServer)
 				server.RegisterService(&sleepServiceDesc, sleep)
 			},
-		))
+		),
+		WithHealth(startedMonitor(t, ctx)))
 	require.NoError(t, err)
 
 	runDone := make(chan error, 1)
@@ -92,14 +104,12 @@ func Test_GRPCServer_With_TLS(t *testing.T) {
 	ctx, cancel := service.SignalContext(t.Context(), syscall.SIGTERM)
 	defer cancel()
 
-	lis, err := new(net.ListenConfig).Listen(ctx, "tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	require.NoError(t, lis.Close())
+	addr := testutil.FreeTCPAddr(t)
 
 	log := logger.ForTests(logger.TestLoggerWriteToTB(t))
 
 	var cfg customGRPCSettings
-	cfg.Address = lis.Addr().String()
+	cfg.Address = addr
 	cfg.TLSConfig = new(config.TLS)
 	cfg.ShutdownTimeout = time.Second
 
@@ -107,13 +117,7 @@ func Test_GRPCServer_With_TLS(t *testing.T) {
 	cfg.TLSConfig.Enabled = true
 	cfg.TLSConfig.KeyFile, cfg.TLSConfig.CertFile = generateTLSKeyPair(t)
 
-	srv, err := NewServer(cfg, log, RegisterServices(
-		func(server *Server) {
-			healthServer := health.NewServer()
-			healthServer.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
-			healthpb.RegisterHealthServer(server, healthServer)
-		},
-	))
+	srv, err := NewServer(cfg, log, WithHealth(startedMonitor(t, ctx)))
 	require.NoError(t, err)
 
 	runDone := make(chan error, 1)
@@ -143,9 +147,7 @@ func Test_GRPCServer_LogsShutdownCallback_Integration(t *testing.T) {
 	top, topCancel := context.WithCancel(t.Context())
 	defer topCancel()
 
-	lis, err := new(net.ListenConfig).Listen(top, "tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	require.NoError(t, lis.Close())
+	addr := testutil.FreeTCPAddr(t)
 
 	buf := logger.NewSyncBuffer()
 	log := logger.ForTests(
@@ -154,7 +156,7 @@ func Test_GRPCServer_LogsShutdownCallback_Integration(t *testing.T) {
 	)
 
 	cfg := customGRPCSettings{
-		Address: lis.Addr().String(),
+		Address: addr,
 		Network: config.Network{ShutdownTimeout: time.Millisecond},
 	}
 	srv, err := NewServer(cfg, log, ServiceName("custom-grpc"))
@@ -188,16 +190,14 @@ func Test_GRPCServer_UsesConfiguredShutdownTimeout_Integration(t *testing.T) {
 	ctx, cancel := service.SignalContext(t.Context(), syscall.SIGTERM)
 	defer cancel()
 
-	lis, err := new(net.ListenConfig).Listen(ctx, "tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	require.NoError(t, lis.Close())
+	addr := testutil.FreeTCPAddr(t)
 
 	log := logger.ForTests(logger.TestLoggerWriteToTB(t))
 	sleep := &sleepServer{started: make(chan struct{})}
 	sleep.delay.Store(int64(100 * time.Millisecond))
 
 	cfg := customGRPCSettings{
-		Address: lis.Addr().String(),
+		Address: addr,
 		Network: config.Network{
 			ShutdownTimeout: 250 * time.Millisecond,
 		},
@@ -254,15 +254,13 @@ func Test_GRPCServer_UsesDefaultShutdownTimeoutFallback_Integration(t *testing.T
 	ctx, cancel := service.SignalContext(t.Context(), syscall.SIGTERM)
 	defer cancel()
 
-	lis, err := new(net.ListenConfig).Listen(ctx, "tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	require.NoError(t, lis.Close())
+	addr := testutil.FreeTCPAddr(t)
 
 	log := logger.ForTests(logger.TestLoggerWriteToTB(t))
 	sleep := &sleepServer{started: make(chan struct{})}
 	sleep.delay.Store(int64(100 * time.Millisecond))
 
-	cfg := customGRPCSettings{Address: lis.Addr().String()}
+	cfg := customGRPCSettings{Address: addr}
 	srv, err := NewServer(cfg, log, RegisterServices(
 		func(server *Server) { server.RegisterService(&sleepServiceDesc, sleep) },
 	))
@@ -324,13 +322,11 @@ func Test_GRPCServer_OpenTelemetryPropagation_Integration(t *testing.T) {
 	ctx, cancel := service.SignalContext(t.Context(), syscall.SIGTERM)
 	defer cancel()
 
-	lis, err := new(net.ListenConfig).Listen(ctx, "tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	require.NoError(t, lis.Close())
+	addr := testutil.FreeTCPAddr(t)
 
 	log := logger.ForTests(logger.TestLoggerWriteToTB(t))
 
-	cfg := customGRPCSettings{Address: lis.Addr().String()}
+	cfg := customGRPCSettings{Address: addr}
 	srv, err := NewServer(cfg, log,
 		WithOpenTelemetry(),
 		RegisterServices(func(server *Server) {
@@ -394,16 +390,14 @@ func Test_GRPCServer_ForcesStopWhenShutdownTimeoutExceeded_Integration(t *testin
 	ctx, cancel := service.SignalContext(t.Context(), syscall.SIGTERM)
 	defer cancel()
 
-	lis, err := new(net.ListenConfig).Listen(ctx, "tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	require.NoError(t, lis.Close())
+	addr := testutil.FreeTCPAddr(t)
 
 	log := logger.ForTests(logger.TestLoggerWriteToTB(t))
 	sleep := &sleepServer{started: make(chan struct{})}
 	sleep.delay.Store(int64(time.Second))
 
 	cfg := customGRPCSettings{
-		Address: lis.Addr().String(),
+		Address: addr,
 		Network: config.Network{
 			ShutdownTimeout: 20 * time.Millisecond,
 		},

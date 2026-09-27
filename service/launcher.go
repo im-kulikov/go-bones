@@ -2,7 +2,7 @@ package service
 
 import (
 	"context"
-	"runtime"
+	"fmt"
 	"slices"
 	"sync/atomic"
 
@@ -16,6 +16,11 @@ var (
 	// ErrStopsLauncher reports that Start was called after Stop had already begun.
 	// Launcher is intentionally single-run, so a stopped instance is terminal.
 	ErrStopsLauncher = bones.Error("start stopped launcher")
+	// ErrLauncherPanicked reports that the callback passed to NewLauncher panicked.
+	// Start recovers the panic instead of letting it crash the process, so one
+	// misbehaving service doesn't take down every other service being orchestrated
+	// alongside it and still gets a chance at an orderly stop/shutdown-hook run.
+	ErrLauncherPanicked = bones.Error("launcher callback panicked")
 )
 
 // Launcher is the user-supplied function executed by launcher.Start.
@@ -35,8 +40,12 @@ type launcher struct {
 	name string
 	call Launcher
 	done chan struct{}
-	logs *logger.Logger
-	hook []func(context.Context)
+	// started is closed once cancel is published, so Stop can wait for that
+	// publication without busy-polling.
+	started chan struct{}
+	logs    *logger.Logger
+	hook    []func(context.Context)
+	check   func(context.Context) error
 
 	init atomic.Bool
 	halt atomic.Bool
@@ -58,13 +67,25 @@ func WithLauncherLogger(log *logger.Logger) LauncherOption {
 	}
 }
 
-// WithLauncherShutdownHooks registers callbacks that run after Stop finishes waiting.
+// WithLauncherShutdownHooks registers callbacks that run exactly once, immediately
+// after the callback passed to NewLauncher returns - whether that happens because
+// Stop canceled it or because it exited on its own. Hooks run synchronously in the
+// same goroutine as the callback, strictly after it returns, so they can never
+// observe or race with a still-executing callback.
+// Hooks get a context detached from Start's cancellation and deadline (it has
+// usually expired by then), so a hook doing blocking cleanup must bound it
+// itself; Stop never waits for hooks beyond its own ctx.
 // Nil callbacks are discarded to keep shutdown paths panic-free for optional hooks.
 func WithLauncherShutdownHooks(hook ...func(context.Context)) LauncherOption {
 	return func(l *launcher) {
-		l.hook = append(l.hook, slices.DeleteFunc(hook, func(h func(context.Context)) bool {
-			return h == nil
-		})...)
+		// Clone before DeleteFunc: hook aliases the caller's backing array when
+		// called as WithLauncherShutdownHooks(existingSlice...), and DeleteFunc
+		// mutates its argument in place.
+		l.hook = append(
+			l.hook,
+			slices.DeleteFunc(slices.Clone(hook), func(h func(context.Context)) bool {
+				return h == nil
+			})...)
 	}
 }
 
@@ -79,22 +100,48 @@ func (l *launcher) apply(options ...LauncherOption) *launcher {
 // NewLauncher creates a Service wrapper for a single background callback.
 //
 // The returned service has a strict lifecycle:
-//   - Start runs the callback once and remembers its result.
-//   - Stop cancels the callback context, waits for completion or shutdown timeout,
-//     and then executes shutdown hooks once.
+//   - Start runs the callback once, remembers its result, and then runs shutdown
+//     hooks once the callback has returned.
+//   - Stop cancels the callback context and waits for completion, up to ctx's
+//     deadline; it never runs shutdown hooks itself.
 //   - Further Start calls fail once the instance has already started or begun stopping.
+//
+// With WithLauncherHealthCheck the returned service also implements HealthChecker.
 func NewLauncher(name string, call Launcher, options ...LauncherOption) Service {
-	return (&launcher{
-		name: name,
-		call: call,
-		logs: logger.Default(),
-		done: make(chan struct{}),
+	l := (&launcher{
+		name:    name,
+		call:    call,
+		logs:    logger.Default(),
+		done:    make(chan struct{}),
+		started: make(chan struct{}),
 	}).apply(options...)
+
+	if l.check != nil {
+		return checkedLauncher{l}
+	}
+
+	return l
 }
 
 // Name returns the service name used in orchestration and lifecycle logs.
 func (l *launcher) Name() string {
 	return l.name
+}
+
+// invoke runs the callback with a panic guard, converting a panic into
+// ErrLauncherPanicked instead of letting it crash the process.
+func (l *launcher) invoke(ctx context.Context) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("%w: %v", ErrLauncherPanicked, r)
+
+			l.logs.ErrorContext(ctx, "launcher callback panicked",
+				logger.String("service", l.name),
+				logger.Any("panic", r))
+		}
+	}()
+
+	return l.call(ctx)
 }
 
 // Start executes the launcher callback exactly once.
@@ -104,6 +151,12 @@ func (l *launcher) Name() string {
 // error is stored, so callers waiting on the same run observe a consistent result.
 // If Stop has already begun, Start returns ErrStopsLauncher immediately because the
 // instance has already entered its terminal shutdown state.
+//
+// Once the callback returns, Start runs the registered shutdown hooks itself, in the
+// same goroutine, before closing l.done. This is the only place hooks run: doing it
+// here - strictly after the callback has returned and before anything is signaled as
+// complete - is what guarantees hooks can never run concurrently with the callback,
+// regardless of whether Stop was ever called or how long its ctx allowed it to wait.
 //
 // Why it works this way:
 //   - The launcher used to have more ambiguous restart semantics.
@@ -126,7 +179,15 @@ func (l *launcher) Start(top context.Context) error {
 	if !l.init.Swap(true) {
 		ctx, cancel := context.WithCancel(top)
 		l.cancel.Store(&cancel)
-		l.errors.Store(new(l.call(ctx)))
+		close(l.started)
+
+		l.errors.Store(new(l.invoke(ctx)))
+
+		hookCtx := context.WithoutCancel(ctx)
+		for _, h := range l.hook {
+			h(hookCtx)
+		}
+
 		close(l.done)
 	}
 
@@ -140,33 +201,38 @@ func (l *launcher) Start(top context.Context) error {
 //
 // Stop is intentionally a no-op before Start, which avoids waiting on a launcher
 // that never claimed resources. Once shutdown begins, Stop cancels the callback
-// context, waits for the callback to exit or for ctx to expire, and finally runs
-// registered shutdown hooks once. The `halt` flag also blocks any later Start call,
-// making Stop the terminal transition for the launcher lifecycle.
+// context and waits for the callback to exit, up to ctx's deadline. The `halt`
+// flag also blocks any later Start call, making Stop the terminal transition for
+// the launcher lifecycle.
+//
+// Stop does not run shutdown hooks itself - see Start, which runs them exactly
+// once, strictly after the callback returns. If ctx expires first, Stop simply
+// returns without waiting further; the callback keeps running in the background
+// (in whatever goroutine called Start) and the hooks still run automatically,
+// from that goroutine, once it eventually does return.
 func (l *launcher) Stop(ctx context.Context) {
 	if called := l.init.Load(); !called {
 		return
 	}
 
 	if !l.halt.Swap(true) {
-		var cancel *context.CancelFunc
-		for cancel = l.cancel.Load(); cancel == nil; cancel = l.cancel.Load() {
-			if ctx.Err() != nil {
-				return
-			}
+		// Wait for cancel publication unconditionally, even if ctx is already
+		// done: init is claimed, and Start publishes cancel and closes started
+		// right after that, before running any user code, so this never blocks
+		// for long. Returning on ctx.Done() here instead (the "fire and forget"
+		// Stop used by network/grpc passes an already-canceled ctx) would set
+		// halt without canceling, leaving the callback running forever.
+		<-l.started
 
-			runtime.Gosched()
-		}
-
+		cancel := l.cancel.Load()
 		(*cancel)()
 
 		select {
 		case <-l.done:
 		case <-ctx.Done():
-		}
-
-		for _, h := range l.hook {
-			h(ctx)
+			l.logs.WarnContext(ctx, "shutdown context expired before the launcher callback "+
+				"returned; it keeps running in the background and shutdown hooks will run once "+
+				"it exits", logger.String("service", l.name))
 		}
 	}
 }
