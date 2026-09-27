@@ -215,7 +215,11 @@ func (g *settings) phasedRun(top context.Context) error {
 }
 
 // startService runs one service and reports a non-ignored error through stop.
-func (g *settings) startService(ctx context.Context, svc Service, stop context.CancelCauseFunc) error {
+func (g *settings) startService(
+	ctx context.Context,
+	svc Service,
+	stop context.CancelCauseFunc,
+) error {
 	g.logger.Info("starting service", logger.String("service", svc.Name()))
 
 	err := svc.Start(ctx)
@@ -267,7 +271,11 @@ func (g *settings) stopServices(grace context.Context, lastGroup bool) {
 		}
 
 		wg.Go(func() {
-			g.logger.InfoContext(grace, "shutting down service", logger.String("service", svc.Name()))
+			g.logger.InfoContext(
+				grace,
+				"shutting down service",
+				logger.String("service", svc.Name()),
+			)
 			svc.Stop(grace)
 		})
 	}

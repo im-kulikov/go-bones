@@ -120,7 +120,12 @@ func TestServer_GracefulShutdown_WithInMemoryTransport(t *testing.T) {
 
 		select {
 		case errRun := <-runDone:
-			require.Failf(t, "server stopped too early", "before the active request was released: %v", errRun)
+			require.Failf(
+				t,
+				"server stopped too early",
+				"before the active request was released: %v",
+				errRun,
+			)
 		default:
 		}
 
@@ -142,8 +147,16 @@ func TestServer_ShutdownTimeout_WithInMemoryTransport(t *testing.T) {
 		timeout time.Duration
 		expect  time.Duration
 	}{
-		{name: "configured timeout", timeout: 250 * time.Millisecond, expect: 250 * time.Millisecond},
-		{name: "zero timeout falls back to default", timeout: 0, expect: internal.FallbackTimeout(0)},
+		{
+			name:    "configured timeout",
+			timeout: 250 * time.Millisecond,
+			expect:  250 * time.Millisecond,
+		},
+		{
+			name:    "zero timeout falls back to default",
+			timeout: 0,
+			expect:  internal.FallbackTimeout(0),
+		},
 	}
 
 	for _, tc := range cases {
@@ -199,7 +212,11 @@ func TestServer_ShutdownTimeout_WithInMemoryTransport(t *testing.T) {
 
 				time.Sleep(tc.expect - time.Nanosecond)
 				synctest.Wait()
-				require.Empty(t, runDone, "server must keep waiting for the active request until the shutdown timeout")
+				require.Empty(
+					t,
+					runDone,
+					"server must keep waiting for the active request until the shutdown timeout",
+				)
 
 				time.Sleep(time.Nanosecond)
 				synctest.Wait()

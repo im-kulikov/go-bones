@@ -197,9 +197,18 @@ func TestInit_InsecureRemoteEndpointWarning(t *testing.T) {
 		setEnv   bool
 		wantWarn bool
 	}{
-		{name: "warns on insecure remote endpoint", endpoint: "collector.example.com:4317", wantWarn: true},
+		{
+			name:     "warns on insecure remote endpoint",
+			endpoint: "collector.example.com:4317",
+			wantWarn: true,
+		},
 		{name: "no warning for local endpoint", endpoint: "localhost:4317", wantWarn: false},
-		{name: "no warning when env overrides the fallback", endpoint: "collector.example.com:4317", setEnv: true, wantWarn: false},
+		{
+			name:     "no warning when env overrides the fallback",
+			endpoint: "collector.example.com:4317",
+			setEnv:   true,
+			wantWarn: false,
+		},
 	}
 
 	for _, tc := range cases {
@@ -882,74 +891,51 @@ func (c *fakeOTLPCollector) handle(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case "/v1/metrics":
 		req := new(colmetricpb.ExportMetricsServiceRequest)
-		if err = proto.Unmarshal(body, req); err != nil {
-			c.addError(fmt.Errorf("unmarshal OTLP metrics request: %w", err))
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-
-		c.mu.Lock()
-		c.metrics = append(c.metrics, req)
-		c.mu.Unlock()
-
-		payload, marshalErr := proto.Marshal(new(colmetricpb.ExportMetricsServiceResponse))
-		if marshalErr != nil {
-			c.addError(fmt.Errorf("marshal OTLP metrics response: %w", marshalErr))
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/x-protobuf")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(payload)
+		c.export(w, body, "metrics", req, new(colmetricpb.ExportMetricsServiceResponse),
+			func() { c.metrics = append(c.metrics, req) })
 	case "/v1/logs":
 		req := new(collogpb.ExportLogsServiceRequest)
-		if err = proto.Unmarshal(body, req); err != nil {
-			c.addError(fmt.Errorf("unmarshal OTLP logs request: %w", err))
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-
-		c.mu.Lock()
-		c.logs = append(c.logs, req)
-		c.mu.Unlock()
-
-		payload, marshalErr := proto.Marshal(new(collogpb.ExportLogsServiceResponse))
-		if marshalErr != nil {
-			c.addError(fmt.Errorf("marshal OTLP logs response: %w", marshalErr))
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/x-protobuf")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(payload)
+		c.export(w, body, "logs", req, new(collogpb.ExportLogsServiceResponse),
+			func() { c.logs = append(c.logs, req) })
 	case "/v1/traces":
 		req := new(coltracepb.ExportTraceServiceRequest)
-		if err = proto.Unmarshal(body, req); err != nil {
-			c.addError(fmt.Errorf("unmarshal OTLP traces request: %w", err))
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-
-		c.mu.Lock()
-		c.traces = append(c.traces, req)
-		c.mu.Unlock()
-
-		payload, marshalErr := proto.Marshal(new(coltracepb.ExportTraceServiceResponse))
-		if marshalErr != nil {
-			c.addError(fmt.Errorf("marshal OTLP traces response: %w", marshalErr))
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/x-protobuf")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(payload)
+		c.export(w, body, "traces", req, new(coltracepb.ExportTraceServiceResponse),
+			func() { c.traces = append(c.traces, req) })
 	default:
 		c.addError(fmt.Errorf("unexpected OTLP path: %s", r.URL.Path))
 		w.WriteHeader(http.StatusNotFound)
 	}
+}
+
+// export decodes one OTLP request, stores it under c.mu and writes an empty
+// OTLP response of the matching type.
+func (c *fakeOTLPCollector) export(
+	w http.ResponseWriter,
+	body []byte,
+	signal string,
+	req, resp proto.Message,
+	store func(),
+) {
+	if err := proto.Unmarshal(body, req); err != nil {
+		c.addError(fmt.Errorf("unmarshal OTLP %s request: %w", signal, err))
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	c.mu.Lock()
+	store()
+	c.mu.Unlock()
+
+	payload, err := proto.Marshal(resp)
+	if err != nil {
+		c.addError(fmt.Errorf("marshal OTLP %s response: %w", signal, err))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/x-protobuf")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(payload)
 }
 
 func (c *fakeOTLPCollector) addError(err error) {

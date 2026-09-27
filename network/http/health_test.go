@@ -84,7 +84,11 @@ func TestHealthEndpoints_WithoutReader(t *testing.T) {
 
 	res := call(t, h, MethodGet, "/healthz")
 	require.Equal(t, StatusOK, res.code)
-	require.JSONEq(t, `{"status":"ok","live":true,"ready":true,"draining":false,"checks":{}}`, res.body)
+	require.JSONEq(
+		t,
+		`{"status":"ok","live":true,"ready":true,"draining":false,"checks":{}}`,
+		res.body,
+	)
 
 	res = call(t, h, MethodPost, "/readyz")
 	require.Equal(t, StatusMethodNotAllowed, res.code)
@@ -106,7 +110,9 @@ func TestHealthEndpoints_Disabled(t *testing.T) {
 
 func TestHealthEndpoints_Snapshot(t *testing.T) {
 	now := time.Date(2026, 9, 22, 10, 15, 4, 0, time.UTC)
-	reader := fakeReader{snap: snapshotOf(true, false,
+	reader := fakeReader{snap: snapshotOf(
+		true,
+		false,
 		health.Result{
 			Name: "postgres", Impact: health.Readiness, Status: health.StatusFailing,
 			Err: errDSN, CheckedAt: now, Duration: 4 * time.Millisecond, ConsecutiveFailures: 3,
@@ -115,10 +121,20 @@ func TestHealthEndpoints_Snapshot(t *testing.T) {
 			Name: "kafka", Impact: health.Informational, Status: health.StatusFailing,
 			Err: health.PublicError("broker unavailable", errDSN), CheckedAt: now,
 		},
-		health.Result{Name: "worker", Impact: health.Liveness, Status: health.StatusPassing, CheckedAt: now},
+		health.Result{
+			Name:      "worker",
+			Impact:    health.Liveness,
+			Status:    health.StatusPassing,
+			CheckedAt: now,
+		},
 		health.Result{Name: "boot", Impact: health.Liveness, Status: health.StatusUnknown},
 		health.Result{Name: "cache", Impact: health.Readiness, Status: health.StatusUnknown},
-		health.Result{Name: "redis", Impact: health.Readiness, Status: health.StatusPassing, Stale: true},
+		health.Result{
+			Name:   "redis",
+			Impact: health.Readiness,
+			Status: health.StatusPassing,
+			Stale:  true,
+		},
 	)}
 
 	h, err := newOPSHandler(opsConfig(t), logger.ForTests(), WithHealth(reader))
@@ -144,8 +160,12 @@ func TestHealthEndpoints_Snapshot(t *testing.T) {
 	t.Run("readyz exclude", func(t *testing.T) {
 		res := call(t, h, MethodGet, "/readyz?exclude=postgres&exclude=cache&exclude=redis&verbose")
 		require.Equal(t, StatusOK, res.code)
-		require.Equal(t, "[+]boot ok\n[+]worker ok\n[+]postgres excluded: ok\n[+]cache excluded: ok\n"+
-			"[+]redis excluded: ok\nreadyz check passed\n", res.body)
+		require.Equal(
+			t,
+			"[+]boot ok\n[+]worker ok\n[+]postgres excluded: ok\n[+]cache excluded: ok\n"+
+				"[+]redis excluded: ok\nreadyz check passed\n",
+			res.body,
+		)
 	})
 
 	t.Run("single check", func(t *testing.T) {
@@ -271,21 +291,32 @@ func TestHealthEndpoints_Metrics(t *testing.T) {
 		require.True(t, strings.Contains(res.body, name+" 0"), name)
 	}
 
-	require.Contains(t, res.body, "go_sched_goroutines_goroutines", "runtime metrics are still exported")
+	require.Contains(
+		t,
+		res.body,
+		"go_sched_goroutines_goroutines",
+		"runtime metrics are still exported",
+	)
 }
 
 func TestHealthEndpoints_MetricsConflict(t *testing.T) {
 	resetOpsRegistry(t)
 
 	reg := prometheus.NewRegistry()
-	reg.MustRegister(prometheus.NewGauge(prometheus.GaugeOpts{Name: "go_bones_health_live", Help: "conflict"}))
+	reg.MustRegister(
+		prometheus.NewGauge(prometheus.GaugeOpts{Name: "go_bones_health_live", Help: "conflict"}),
+	)
 	registry.Store(reg)
 	runtimeMetricsRegistered.Store(true)
 
 	var cfg config.Ops
 	require.NoError(t, gonfig.SetDefaults(&cfg))
 
-	_, err := newOPSHandler(cfg, logger.ForTests(), WithHealth(health.New(config.Health{}, logger.ForTests())))
+	_, err := newOPSHandler(
+		cfg,
+		logger.ForTests(),
+		WithHealth(health.New(config.Health{}, logger.ForTests())),
+	)
 	require.Error(t, err)
 }
 
@@ -308,5 +339,9 @@ func TestHealthEndpoints_WriteErrors(t *testing.T) {
 
 func TestResultMessage(t *testing.T) {
 	require.Equal(t, "error", resultMessage(health.Result{Status: health.StatusFailing}))
-	require.Equal(t, "timeout", resultMessage(health.Result{Status: health.StatusFailing, Err: health.ErrTimeout}))
+	require.Equal(
+		t,
+		"timeout",
+		resultMessage(health.Result{Status: health.StatusFailing, Err: health.ErrTimeout}),
+	)
 }

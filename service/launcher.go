@@ -78,9 +78,11 @@ func WithLauncherShutdownHooks(hook ...func(context.Context)) LauncherOption {
 		// Clone before DeleteFunc: hook aliases the caller's backing array when
 		// called as WithLauncherShutdownHooks(existingSlice...), and DeleteFunc
 		// mutates its argument in place.
-		l.hook = append(l.hook, slices.DeleteFunc(slices.Clone(hook), func(h func(context.Context)) bool {
-			return h == nil
-		})...)
+		l.hook = append(
+			l.hook,
+			slices.DeleteFunc(slices.Clone(hook), func(h func(context.Context)) bool {
+				return h == nil
+			})...)
 	}
 }
 

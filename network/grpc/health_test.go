@@ -81,7 +81,10 @@ func newHealthFixture(t *testing.T) *healthFixture {
 	}
 }
 
-func (f *healthFixture) status(t *testing.T, service string) healthpb.HealthCheckResponse_ServingStatus {
+func (f *healthFixture) status(
+	t *testing.T,
+	service string,
+) healthpb.HealthCheckResponse_ServingStatus {
 	t.Helper()
 
 	synctest.Wait()
@@ -123,7 +126,10 @@ func TestGRPCHealth_WatchAndDrain(t *testing.T) {
 		f := newHealthFixture(t)
 		defer f.stop()
 
-		stream, err := f.client.Watch(t.Context(), &healthpb.HealthCheckRequest{Service: HealthServiceReadiness})
+		stream, err := f.client.Watch(
+			t.Context(),
+			&healthpb.HealthCheckRequest{Service: HealthServiceReadiness},
+		)
 		require.NoError(t, err)
 
 		next := func() healthpb.HealthCheckResponse_ServingStatus {

@@ -119,8 +119,11 @@ func TestRegisterAfterStart(t *testing.T) {
 		m := newTestMonitor(t, testConfig())
 		stop := start(t, m)
 
-		require.ErrorIs(t, m.Register("late", CheckerFunc(func(context.Context) error { return nil })),
-			ErrMonitorStarted)
+		require.ErrorIs(
+			t,
+			m.Register("late", CheckerFunc(func(context.Context) error { return nil })),
+			ErrMonitorStarted,
+		)
 		require.ErrorIs(t, m.Start(t.Context()), ErrMonitorStarted)
 
 		stop()
@@ -201,7 +204,11 @@ func TestHungChecker(t *testing.T) {
 		time.Sleep(30 * time.Second)
 		synctest.Wait()
 		require.EqualValues(t, 1, calls.Load())
-		require.True(t, m.Snapshot().Checks["hung"].Stale, "no fresh result within 2*interval+timeout")
+		require.True(
+			t,
+			m.Snapshot().Checks["hung"].Stale,
+			"no fresh result within 2*interval+timeout",
+		)
 
 		close(release)
 		time.Sleep(time.Second)
@@ -381,7 +388,12 @@ func TestTrigger(t *testing.T) {
 		c.set(errDown)
 		m.Trigger("db")
 		synctest.Wait()
-		require.EqualValues(t, 3, c.calls.Load(), "trigger runs immediately without waiting for a tick")
+		require.EqualValues(
+			t,
+			3,
+			c.calls.Load(),
+			"trigger runs immediately without waiting for a tick",
+		)
 		require.False(t, m.Snapshot().Ready)
 	})
 }
@@ -389,7 +401,10 @@ func TestTrigger(t *testing.T) {
 func TestPanics(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		m := newTestMonitor(t, testConfig())
-		require.NoError(t, m.Register("boom", CheckerFunc(func(context.Context) error { panic("boom") })))
+		require.NoError(
+			t,
+			m.Register("boom", CheckerFunc(func(context.Context) error { panic("boom") })),
+		)
 
 		other := new(counter)
 		require.NoError(t, m.Register("other", other))
@@ -520,7 +535,12 @@ func TestStop(t *testing.T) {
 
 		begin := time.Now()
 		m.Stop(ctx)
-		require.Equal(t, time.Second, time.Since(begin), "Stop waits for in-flight checks up to the deadline")
+		require.Equal(
+			t,
+			time.Second,
+			time.Since(begin),
+			"Stop waits for in-flight checks up to the deadline",
+		)
 		require.NoError(t, <-done)
 
 		snap := m.Snapshot()

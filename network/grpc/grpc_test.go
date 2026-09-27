@@ -440,7 +440,12 @@ func TestGRPCServer_GracefulShutdown_WithInMemoryTransport(t *testing.T) {
 		// GracefulStop must keep the server running until the active RPC is released.
 		select {
 		case errRun := <-runDone:
-			require.Failf(t, "server stopped too early", "before the active RPC was released: %v", errRun)
+			require.Failf(
+				t,
+				"server stopped too early",
+				"before the active RPC was released: %v",
+				errRun,
+			)
 		case errCall := <-callDone:
 			require.Failf(t, "RPC finished too early", "before it was released: %v", errCall)
 		default:

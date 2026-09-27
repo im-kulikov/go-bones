@@ -95,8 +95,12 @@ func TestStop_PrefersPublishedCancelOverExpiredContext(t *testing.T) {
 
 		l.Stop(stopCtx)
 
-		require.True(t, cancelCalled.Load(),
-			"iteration %d: Stop must call the already-published cancel even when ctx is already done", i)
+		require.True(
+			t,
+			cancelCalled.Load(),
+			"iteration %d: Stop must call the already-published cancel even when ctx is already done",
+			i,
+		)
 	}
 }
 
@@ -227,12 +231,25 @@ func Test_Workers(t *testing.T) {
 
 		start := time.Now()
 		wrk.Stop(stopCtx)
-		require.Less(t, time.Since(start), 100*time.Millisecond, "Stop must respect the grace period")
-		require.False(t, hookCalled.Load(), "hooks must not run while the callback is still executing")
+		require.Less(
+			t,
+			time.Since(start),
+			100*time.Millisecond,
+			"Stop must respect the grace period",
+		)
+		require.False(
+			t,
+			hookCalled.Load(),
+			"hooks must not run while the callback is still executing",
+		)
 
 		close(release)
 		require.NoError(t, <-runDone)
-		require.True(t, hookCalled.Load(), "hooks must still run once the callback actually returns")
+		require.True(
+			t,
+			hookCalled.Load(),
+			"hooks must still run once the callback actually returns",
+		)
 	})
 
 	t.Run("should not run launcher on cancelled context", func(t *testing.T) {

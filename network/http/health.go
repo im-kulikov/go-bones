@@ -58,7 +58,12 @@ type healthHandlers struct {
 	log    *logger.Logger
 }
 
-func registerHealthHandlers(mux *ServeMux, cfg opsHealthPaths, reader health.Reader, log *logger.Logger) {
+func registerHealthHandlers(
+	mux *ServeMux,
+	cfg opsHealthPaths,
+	reader health.Reader,
+	log *logger.Logger,
+) {
 	if reader == nil {
 		reader = staticReader{}
 	}
@@ -100,7 +105,7 @@ func (h *healthHandlers) guard(next HandlerFunc) HandlerFunc {
 
 		if r.Method != MethodGet && r.Method != MethodHead {
 			w.Header().Set("Allow", "GET, HEAD")
-			h.write(w, r, StatusMethodNotAllowed, contentTypeText, "method not allowed\n")
+			h.writeText(w, r, StatusMethodNotAllowed, "method not allowed\n")
 
 			return
 		}
@@ -109,8 +114,8 @@ func (h *healthHandlers) guard(next HandlerFunc) HandlerFunc {
 	}
 }
 
-func (h *healthHandlers) write(w ResponseWriter, r *Request, code int, contentType, body string) {
-	w.Header().Set("Content-Type", contentType)
+func (h *healthHandlers) writeText(w ResponseWriter, r *Request, code int, body string) {
+	w.Header().Set("Content-Type", contentTypeText)
 	w.WriteHeader(code)
 
 	if _, err := w.Write([]byte(body)); err != nil {
@@ -193,7 +198,7 @@ func (h *healthHandlers) probe(kind probe, name string) HandlerFunc {
 			body = strings.Join(failed, "\n") + "\n" + verdict
 		}
 
-		h.write(w, r, statusCode(ok), contentTypeText, body)
+		h.writeText(w, r, statusCode(ok), body)
 	}
 }
 
@@ -256,18 +261,18 @@ func (h *healthHandlers) single(kind probe, base string) HandlerFunc {
 
 		res, ok := h.reader.Snapshot().Checks[name]
 		if !ok || name == "" || !relevant(kind, res) {
-			h.write(w, r, StatusNotFound, contentTypeText, "check not found\n")
+			h.writeText(w, r, StatusNotFound, "check not found\n")
 
 			return
 		}
 
 		if checkOK(res) {
-			h.write(w, r, StatusOK, contentTypeText, "ok\n")
+			h.writeText(w, r, StatusOK, "ok\n")
 
 			return
 		}
 
-		h.write(w, r, StatusServiceUnavailable, contentTypeText,
+		h.writeText(w, r, StatusServiceUnavailable,
 			"[-]"+name+" failed: "+resultMessage(res)+"\n")
 	}
 }

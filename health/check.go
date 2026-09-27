@@ -202,7 +202,7 @@ func (m *Monitor) run(ctx context.Context, r *registration) {
 		return // shutting down: do not record cancellations as failures
 	}
 
-	err, kind := classify(err, r.timeout)
+	kind, err := classify(err, r.timeout)
 	m.record(r, err, kind, time.Since(started))
 }
 
@@ -228,18 +228,18 @@ func (m *Monitor) call(ctx context.Context, r *registration) (err error) {
 }
 
 // classify maps an error to the run outcome.
-func classify(err error, timeout time.Duration) (error, string) {
+func classify(err error, timeout time.Duration) (string, error) {
 	switch {
 	case err == nil:
-		return nil, resultSuccess
+		return resultSuccess, nil
 	case errors.Is(err, ErrPanic):
-		return err, resultPanic
+		return resultPanic, err
 	case errors.Is(err, ErrTimeout):
-		return err, resultTimeout
+		return resultTimeout, err
 	case errors.Is(err, context.DeadlineExceeded):
-		return fmt.Errorf("%w after %s: %w", ErrTimeout, timeout, err), resultTimeout
+		return resultTimeout, fmt.Errorf("%w after %s: %w", ErrTimeout, timeout, err)
 	default:
-		return err, resultError
+		return resultError, err
 	}
 }
 
@@ -266,7 +266,8 @@ func (m *Monitor) record(r *registration, err error, kind string, took time.Dura
 		next.ConsecutiveSuccesses++
 		next.ConsecutiveFailures = 0
 
-		if prev.Status != StatusPassing && (prev.Status == StatusUnknown || next.ConsecutiveSuccesses >= r.success) {
+		if prev.Status != StatusPassing &&
+			(prev.Status == StatusUnknown || next.ConsecutiveSuccesses >= r.success) {
 			next.Status = StatusPassing
 		}
 	} else {
@@ -274,7 +275,8 @@ func (m *Monitor) record(r *registration, err error, kind string, took time.Dura
 		next.ConsecutiveFailures++
 		next.ConsecutiveSuccesses = 0
 
-		if prev.Status != StatusFailing && (prev.Status == StatusUnknown || next.ConsecutiveFailures >= r.failure) {
+		if prev.Status != StatusFailing &&
+			(prev.Status == StatusUnknown || next.ConsecutiveFailures >= r.failure) {
 			next.Status = StatusFailing
 		}
 	}

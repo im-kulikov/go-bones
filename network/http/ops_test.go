@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http/httptest"
@@ -310,7 +311,12 @@ func Test_opsServer(t *testing.T) {
 	ops, err := NewOPSServer(cfg, log)
 	require.NoError(t, err)
 
-	ctx, cancel := service.SignalContext(t.Context(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	ctx, cancel := service.SignalContext(
+		t.Context(),
+		syscall.SIGINT,
+		syscall.SIGTERM,
+		syscall.SIGHUP,
+	)
 	defer cancel()
 
 	done := make(chan struct{})
@@ -342,7 +348,12 @@ func Test_opsServer(t *testing.T) {
 			ref, errRef := url.Parse(link)
 			require.NoError(t, errRef)
 			uri.Scheme = "http"
-			req, errReq := NewRequestWithContext(ctx, MethodGet, uri.ResolveReference(ref).String(), NoBody)
+			req, errReq := NewRequestWithContext(
+				ctx,
+				MethodGet,
+				uri.ResolveReference(ref).String(),
+				NoBody,
+			)
 			require.NoError(t, errReq)
 			t.Logf("Request #%d: %s", i, link)
 			resp, errResp := client.Do(req)
@@ -356,13 +367,7 @@ func Test_opsServer(t *testing.T) {
 	}
 
 	metricsURL := (&url.URL{Scheme: "http", Host: cfg.Address, Path: cfg.MetricsPath}).String()
-	req, err := NewRequestWithContext(ctx, MethodGet, metricsURL, NoBody)
-	require.NoError(t, err)
-	resp, err := client.Do(req)
-	require.NoError(t, err)
-	defer func(body io.ReadCloser) { _ = body.Close() }(resp.Body)
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
+	_, _, body := opsGet(ctx, t, client, metricsURL)
 
 	metricsText := string(body)
 	for _, name := range requiredOpsRuntimeMetricNames {
@@ -373,27 +378,44 @@ func Test_opsServer(t *testing.T) {
 	testutil.WriteArtifact(t, "ops-metrics.prom", body)
 
 	goroutineLeakURL := (&url.URL{Scheme: "http", Host: cfg.Address, Path: cfg.ProfilePath + "/goroutineleak"}).String()
-	req, err = NewRequestWithContext(ctx, MethodGet, goroutineLeakURL, NoBody)
-	require.NoError(t, err)
-	resp, err = client.Do(req)
-	require.NoError(t, err)
-	defer func(body io.ReadCloser) { _ = body.Close() }(resp.Body)
-	goroutineLeakBody, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
+	code, header, goroutineLeakBody := opsGet(ctx, t, client, goroutineLeakURL)
 
 	if rpprof.Lookup("goroutineleak") != nil {
-		assert.Equal(t, StatusOK, resp.StatusCode)
+		assert.Equal(t, StatusOK, code)
 		assert.NotEmpty(t, goroutineLeakBody)
-		assert.Equal(t, "application/octet-stream", resp.Header.Get("Content-Type"))
+		assert.Equal(t, "application/octet-stream", header.Get("Content-Type"))
 		testutil.WriteArtifact(t, "ops-goroutineleak.pprof", goroutineLeakBody)
 		t.Logf("Artifact wrote to %s", t.ArtifactDir())
 	} else {
-		assert.Equal(t, StatusNotFound, resp.StatusCode)
+		assert.Equal(t, StatusNotFound, code)
 		assert.Contains(t, string(goroutineLeakBody), "Unknown profile")
 	}
 
 	cancel()
 	wait.Wait()
+}
+
+// opsGet performs a GET request and returns the status, headers and the fully read body.
+func opsGet(
+	ctx context.Context,
+	t *testing.T,
+	client *Client,
+	rawURL string,
+) (int, Header, []byte) {
+	t.Helper()
+
+	req, err := NewRequestWithContext(ctx, MethodGet, rawURL, NoBody)
+	require.NoError(t, err)
+
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	return resp.StatusCode, resp.Header, body
 }
 
 // TestGetRegistry_CASLoserPath deterministically covers the branch that

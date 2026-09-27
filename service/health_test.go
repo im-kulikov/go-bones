@@ -285,10 +285,17 @@ func TestWithHealth_FailureSkipsDrainDelay(t *testing.T) {
 
 		signals, _ := fakeSignals()
 		begin := time.Now()
-		err := RunContext(t.Context(), logger.ForTests(), signals,
+		err := RunContext(
+			t.Context(),
+			logger.ForTests(),
+			signals,
 			WithHealth(hc),
 			WithDrainDelay(time.Minute),
-			WithService(&fakeService{name: "api", log: j}, &fakeService{name: "bad", log: j, err: errBoom}))
+			WithService(
+				&fakeService{name: "api", log: j},
+				&fakeService{name: "bad", log: j, err: errBoom},
+			),
+		)
 
 		require.ErrorIs(t, err, errBoom)
 		require.Zero(t, time.Since(begin))

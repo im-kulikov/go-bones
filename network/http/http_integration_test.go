@@ -93,69 +93,73 @@ func Test_NewHTTPServer_With_TLS(t *testing.T) {
 	<-out
 }
 
+// testShutdownDeadlineCancelsActiveRequest checks that the run context deadline
+// cancels a request that is still active when the server shuts down.
+func testShutdownDeadlineCancelsActiveRequest(t *testing.T) {
+	ctx, cancel := service.SignalContext(t.Context(), syscall.SIGTERM)
+	defer cancel()
+
+	addr := testutil.FreeTCPAddr(t)
+
+	log := logger.ForTests(logger.TestLoggerWriteToTB(t))
+	cfg := customHTTPSettings{
+		Network: config.Network{ShutdownTimeout: 10 * time.Millisecond},
+		Address: addr,
+	}
+	requestStarted := make(chan struct{})
+	releaseRequest := make(chan struct{})
+	defer close(releaseRequest)
+
+	svc, err := NewServer(
+		cfg,
+		log,
+		ServerOptions(func(srv *Server) {
+			srv.Handler = HandlerFunc(func(ResponseWriter, *Request) {
+				close(requestStarted)
+				<-releaseRequest
+			})
+		}),
+	)
+	require.NoError(t, err)
+
+	runCtx, runCancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer runCancel()
+
+	runDone := make(chan error, 1)
+	go func() { runDone <- svc.Start(runCtx) }()
+
+	requireHTTPServerReady(t, cfg.Address)
+
+	uri := url.URL{Scheme: "http", Host: cfg.Address}
+	req, err := NewRequestWithContext(runCtx, MethodGet, uri.String(), nil)
+	require.NoError(t, err)
+
+	requestDone := make(chan error, 1)
+	go func() {
+		resp, requestErr := new(Client).Do(req)
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+
+		requestDone <- requestErr
+	}()
+
+	select {
+	case <-requestStarted:
+	case errReq := <-requestDone:
+		require.FailNowf(t, "request failed before reaching the handler", "%v", errReq)
+	case <-time.After(time.Second):
+		require.FailNow(t, "request did not reach the handler")
+	}
+
+	require.ErrorIs(t, <-requestDone, context.DeadlineExceeded)
+	assert.NoError(t, <-runDone)
+}
+
 func Test_HTTPServer_ShutdownBehavior_Integration(t *testing.T) {
 	testutil.RequireNetworkIntegration(t)
 
-	t.Run("deadline cancels active request", func(t *testing.T) {
-		ctx, cancel := service.SignalContext(t.Context(), syscall.SIGTERM)
-		defer cancel()
-
-		addr := testutil.FreeTCPAddr(t)
-
-		log := logger.ForTests(logger.TestLoggerWriteToTB(t))
-		cfg := customHTTPSettings{
-			Network: config.Network{ShutdownTimeout: 10 * time.Millisecond},
-			Address: addr,
-		}
-		requestStarted := make(chan struct{})
-		releaseRequest := make(chan struct{})
-		defer close(releaseRequest)
-
-		svc, err := NewServer(
-			cfg,
-			log,
-			ServerOptions(func(srv *Server) {
-				srv.Handler = HandlerFunc(func(ResponseWriter, *Request) {
-					close(requestStarted)
-					<-releaseRequest
-				})
-			}),
-		)
-		require.NoError(t, err)
-
-		runCtx, runCancel := context.WithTimeout(ctx, 100*time.Millisecond)
-		defer runCancel()
-
-		runDone := make(chan error, 1)
-		go func() { runDone <- svc.Start(runCtx) }()
-
-		requireHTTPServerReady(t, cfg.Address)
-
-		uri := url.URL{Scheme: "http", Host: cfg.Address}
-		req, err := NewRequestWithContext(runCtx, MethodGet, uri.String(), nil)
-		require.NoError(t, err)
-
-		requestDone := make(chan error, 1)
-		go func() {
-			resp, requestErr := new(Client).Do(req)
-			if resp != nil {
-				_ = resp.Body.Close()
-			}
-
-			requestDone <- requestErr
-		}()
-
-		select {
-		case <-requestStarted:
-		case errReq := <-requestDone:
-			require.FailNowf(t, "request failed before reaching the handler", "%v", errReq)
-		case <-time.After(time.Second):
-			require.FailNow(t, "request did not reach the handler")
-		}
-
-		require.ErrorIs(t, <-requestDone, context.DeadlineExceeded)
-		assert.NoError(t, <-runDone)
-	})
+	t.Run("deadline cancels active request", testShutdownDeadlineCancelsActiveRequest)
 
 	t.Run("configured timeout keeps request alive", func(t *testing.T) {
 		ctx, cancel := service.SignalContext(t.Context(), syscall.SIGTERM)
@@ -247,7 +251,12 @@ func Test_HTTPServer_ShutdownBehavior_Integration(t *testing.T) {
 
 		select {
 		case errDone := <-runDone:
-			require.Failf(t, "server stopped too early", "before active request was released: %v", errDone)
+			require.Failf(
+				t,
+				"server stopped too early",
+				"before active request was released: %v",
+				errDone,
+			)
 		case <-time.After(20 * time.Millisecond):
 		}
 

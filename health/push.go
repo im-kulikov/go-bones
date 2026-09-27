@@ -19,7 +19,7 @@ func (h *StatusHandle) Set(err error) {
 		return
 	}
 
-	err, kind := classify(err, 0)
+	kind, err := classify(err, 0)
 	h.m.record(h.r, err, kind, -1)
 }
 

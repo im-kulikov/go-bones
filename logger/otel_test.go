@@ -67,6 +67,7 @@ func (s stubStringer) String() string { return string(s) }
 func (s stubLogValuer) LogValue() slog.Value {
 	return slog.StringValue(string(s))
 }
+
 func (p *captureProcessor) OnEmit(_ context.Context, record *sdklog.Record) error {
 	item := capturedRecord{
 		Body:         record.Body().AsString(),

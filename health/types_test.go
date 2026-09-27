@@ -55,11 +55,11 @@ func TestPublicMessage(t *testing.T) {
 }
 
 func TestClassify(t *testing.T) {
-	err, kind := classify(context.DeadlineExceeded, time.Second)
+	kind, err := classify(context.DeadlineExceeded, time.Second)
 	require.ErrorIs(t, err, ErrTimeout)
 	require.Equal(t, resultTimeout, kind)
 
-	err, kind = classify(ErrTimeout, time.Second)
+	kind, err = classify(ErrTimeout, time.Second)
 	require.ErrorIs(t, err, ErrTimeout)
 	require.Equal(t, resultTimeout, kind)
 }
@@ -172,6 +172,10 @@ func TestCollector(t *testing.T) {
 		}
 
 		require.Contains(t, got, `go_bones_health_check_last_success_timestamp_seconds{check="db"}`)
-		require.NotContains(t, got, `go_bones_health_check_last_success_timestamp_seconds{check="slow"}`)
+		require.NotContains(
+			t,
+			got,
+			`go_bones_health_check_last_success_timestamp_seconds{check="slow"}`,
+		)
 	})
 }

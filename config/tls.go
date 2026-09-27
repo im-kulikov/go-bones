@@ -88,7 +88,8 @@ func cipherSuiteIDs(names []string) ([]uint16, error) {
 }
 
 func validateClientCA(authType tls.ClientAuthType, caFile string) error {
-	requireCA := authType == tls.VerifyClientCertIfGiven || authType == tls.RequireAndVerifyClientCert
+	requireCA := authType == tls.VerifyClientCertIfGiven ||
+		authType == tls.RequireAndVerifyClientCert
 	if requireCA && caFile == "" {
 		return fmt.Errorf("%w: auth type = %q", ErrMTLSRequiresCACertFile, authType)
 	}
@@ -98,32 +99,9 @@ func validateClientCA(authType tls.ClientAuthType, caFile string) error {
 
 // Prepare initializes and returns a tls.Config based on the TLS settings, or an error if the configuration is invalid.
 func (c TLS) Prepare() (*tls.Config, error) {
-	if !c.Enabled {
-		return nil, ErrTLSDisabled
-	}
-
-	if c.CertFile == "" || c.KeyFile == "" {
-		return nil, fmt.Errorf(
-			"%w: cert=%q, key=%q",
-			ErrTLSEmptyKeyPair,
-			c.CertFile,
-			c.KeyFile,
-		)
-	}
-
-	var err error
-	minVersion, ok := tlsVersions[c.MinVersion]
-	if !ok {
-		return nil, fmt.Errorf("%w: %s", ErrUnknownTLSVersion, c.MinVersion)
-	}
-
-	if _, ok = clientAuthMap[c.ClientAuth]; !ok {
-		return nil, fmt.Errorf("%w: %s", ErrUnknownTLSClientAuth, c.ClientAuth)
-	}
-
-	if minVersion == tls.VersionTLS13 && len(c.CipherSuites) > 0 {
-		return nil, fmt.Errorf("%w: min_version=%s, cipher_suites=%v",
-			ErrCipherSuitesIneffectiveAtTLS13, c.MinVersion, c.CipherSuites)
+	minVersion, err := c.validate()
+	if err != nil {
+		return nil, err
 	}
 
 	var certificates [1]tls.Certificate
@@ -143,19 +121,64 @@ func (c TLS) Prepare() (*tls.Config, error) {
 
 	if err = validateClientCA(cfg.ClientAuth, c.CACertFile); err != nil {
 		return nil, err
-	} else if c.CACertFile == "" {
-		return cfg, nil
 	}
 
-	var pem []byte
-	if pem, err = os.ReadFile(c.CACertFile); err != nil {
-		return nil, fmt.Errorf("could not load client ca file (%q): %w", c.CACertFile, err)
-	}
-
-	cfg.ClientCAs = x509.NewCertPool()
-	if !cfg.ClientCAs.AppendCertsFromPEM(pem) {
-		return nil, fmt.Errorf("could not parse client ca: invalid PEM")
+	if cfg.ClientCAs, err = loadClientCAs(c.CACertFile); err != nil {
+		return nil, err
 	}
 
 	return cfg, nil
+}
+
+// validate checks the settings that do not require reading files and returns
+// the resolved minimum TLS version.
+func (c TLS) validate() (uint16, error) {
+	if !c.Enabled {
+		return 0, ErrTLSDisabled
+	}
+
+	if c.CertFile == "" || c.KeyFile == "" {
+		return 0, fmt.Errorf(
+			"%w: cert=%q, key=%q",
+			ErrTLSEmptyKeyPair,
+			c.CertFile,
+			c.KeyFile,
+		)
+	}
+
+	minVersion, ok := tlsVersions[c.MinVersion]
+	if !ok {
+		return 0, fmt.Errorf("%w: %s", ErrUnknownTLSVersion, c.MinVersion)
+	}
+
+	if _, ok = clientAuthMap[c.ClientAuth]; !ok {
+		return 0, fmt.Errorf("%w: %s", ErrUnknownTLSClientAuth, c.ClientAuth)
+	}
+
+	if minVersion == tls.VersionTLS13 && len(c.CipherSuites) > 0 {
+		return 0, fmt.Errorf("%w: min_version=%s, cipher_suites=%v",
+			ErrCipherSuitesIneffectiveAtTLS13, c.MinVersion, c.CipherSuites)
+	}
+
+	return minVersion, nil
+}
+
+// loadClientCAs reads the PEM bundle used to verify client certificates.
+// An empty path means no client CA pool.
+func loadClientCAs(caFile string) (*x509.CertPool, error) {
+	if caFile == "" {
+		return nil, nil
+	}
+
+	pem, err := os.ReadFile(caFile) // #nosec G304 -- trusted config path
+	if err != nil {
+		return nil, fmt.Errorf("could not load client ca file (%q): %w", caFile, err)
+	}
+
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pem) {
+		return nil, fmt.Errorf("could not parse client ca: invalid PEM")
+	}
+
+	return pool, nil
 }

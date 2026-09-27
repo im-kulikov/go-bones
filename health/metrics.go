@@ -47,8 +47,12 @@ func newMetrics() *metrics {
 		live:     desc("live", "1 when the service is live.", nil),
 		ready:    desc("ready", "1 when the service is ready.", nil),
 		draining: desc("draining", "1 when the service is draining.", nil),
-		up:       desc("check_up", "1 when the check is passing and fresh.", []string{"check", "impact"}),
-		stale:    desc("check_stale", "1 when the check result is stale.", []string{"check"}),
+		up: desc(
+			"check_up",
+			"1 when the check is passing and fresh.",
+			[]string{"check", "impact"},
+		),
+		stale: desc("check_stale", "1 when the check result is stale.", []string{"check"}),
 		success: desc("check_last_success_timestamp_seconds",
 			"Unix time of the last successful check run.", []string{"check"}),
 	}

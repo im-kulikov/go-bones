@@ -15,7 +15,9 @@ func ExampleMonitor_Status() {
 	hc := health.New(config.Health{}, logger.ForTests())
 
 	kafka, _ := hc.Status("kafka", health.WithImpact(health.Informational))
-	kafka.Set(health.PublicError("broker unavailable", errors.New("dial tcp 10.0.0.7:9092: refused")))
+	kafka.Set(
+		health.PublicError("broker unavailable", errors.New("dial tcp 10.0.0.7:9092: refused")),
+	)
 
 	res := hc.Snapshot().Checks["kafka"]
 	fmt.Println(res.Status, "-", health.PublicMessage(res.Err))
