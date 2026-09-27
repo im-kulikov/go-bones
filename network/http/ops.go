@@ -209,28 +209,27 @@ func registerRuntimeMetrics() error {
 	return nil
 }
 
-// registerHealthMetrics registers a health reader that is also a Prometheus
-// collector. A collector that is already registered is not an error.
-func registerHealthMetrics(reader any) error {
-	collector, ok := reader.(prometheus.Collector)
-	if !ok {
-		return nil
+// metricsHandler serves the process-wide OPS registry plus, when the health
+// reader is a Prometheus collector, that collector from a registry owned by
+// this OPS server. Health metrics are per server, so they never compete with
+// other servers or user collectors in the shared registry; a name clash with
+// a user metric surfaces as a scrape error instead of silently dropping data.
+func metricsHandler(reader any) (Handler, error) {
+	reg := getRegistry()
+
+	var gatherer prometheus.Gatherer = reg
+	if collector, ok := reader.(prometheus.Collector); ok {
+		own := prometheus.NewRegistry()
+		if err := own.Register(collector); err != nil {
+			return nil, err
+		}
+
+		gatherer = prometheus.Gatherers{reg, own}
 	}
 
-	err := RegisterMetrics(collector)
-	are, ok := errors.AsType[prometheus.AlreadyRegisteredError](err)
-	if !ok {
-		return err
-	}
+	handler := promhttp.HandlerFor(gatherer, promhttp.HandlerOpts{})
 
-	// A collector with the same metric set is registered (e.g. a previous app
-	// instance in this process): replace it, otherwise the new reader's metrics
-	// would never be exported. Collectors are not compared with ==: a
-	// non-comparable dynamic type would panic, and re-registering the same
-	// collector is harmless.
-	getRegistry().Unregister(are.ExistingCollector)
-
-	return RegisterMetrics(collector)
+	return promhttp.InstrumentMetricHandler(reg, handler), nil
 }
 
 // NewOPSServer creates an HTTP service exposing monitoring and debugging endpoints.
@@ -322,14 +321,12 @@ func newOPSHandler(cfg config.Ops, log *logger.Logger, opts ...OPSOption) (_ Han
 			return nil, err
 		}
 
-		if err := registerHealthMetrics(options.health); err != nil {
+		metrics, err := metricsHandler(options.health)
+		if err != nil {
 			return nil, err
 		}
 
-		reg := getRegistry()
-		mux.Handle(cfg.MetricsPath, promhttp.InstrumentMetricHandler(
-			reg, promhttp.HandlerFor(reg, promhttp.HandlerOpts{}),
-		))
+		mux.Handle(cfg.MetricsPath, metrics)
 	}
 
 	// prepare exp variables handlers

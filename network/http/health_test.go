@@ -279,7 +279,12 @@ func TestHealthEndpoints_Metrics(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = NewOPSServer(cfg, logger.ForTests(), WithHealth(hc))
-	require.NoError(t, err, "the same collector registered twice is fine")
+	require.NoError(t, err, "the same collector on two OPS servers is fine")
+
+	other := health.New(config.Health{}, logger.ForTests())
+	h2, err := newOPSHandler(cfg, logger.ForTests(), WithHealth(other))
+	require.NoError(t, err, "another monitor on another OPS server is fine")
+	require.Equal(t, StatusOK, call(t, h2, MethodGet, cfg.MetricsPath).code)
 
 	_, err = newOPSHandler(cfg, logger.ForTests(), WithHealth(fakeReader{}))
 	require.NoError(t, err, "readers that are not collectors are skipped")
@@ -312,12 +317,37 @@ func TestHealthEndpoints_MetricsConflict(t *testing.T) {
 	var cfg config.Ops
 	require.NoError(t, gonfig.SetDefaults(&cfg))
 
-	_, err := newOPSHandler(
+	h, err := newOPSHandler(
 		cfg,
 		logger.ForTests(),
 		WithHealth(health.New(config.Health{}, logger.ForTests())),
 	)
-	require.Error(t, err)
+	require.NoError(t, err)
+
+	// A user metric clashing with a health metric is reported on scrape,
+	// neither collector is silently dropped.
+	res := call(t, h, MethodGet, cfg.MetricsPath)
+	require.Equal(t, StatusInternalServerError, res.code)
+	require.Contains(t, res.body, "go_bones_health_live")
+}
+
+// invalidCollector fails registration even in a fresh registry.
+type invalidCollector struct{ fakeReader }
+
+func (invalidCollector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- prometheus.NewInvalidDesc(errors.New("broken collector"))
+}
+
+func (invalidCollector) Collect(chan<- prometheus.Metric) {}
+
+func TestHealthEndpoints_InvalidCollector(t *testing.T) {
+	resetOpsRegistry(t)
+
+	var cfg config.Ops
+	require.NoError(t, gonfig.SetDefaults(&cfg))
+
+	_, err := newOPSHandler(cfg, logger.ForTests(), WithHealth(invalidCollector{}))
+	require.ErrorContains(t, err, "broken collector")
 }
 
 // failingWriter fails on Write to exercise logging of write errors.
