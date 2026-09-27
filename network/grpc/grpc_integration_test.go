@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
-	"net"
 	"syscall"
 	"testing"
 	"time"
@@ -43,15 +42,13 @@ func Test_GRPCServer_ServesRequests(t *testing.T) {
 	ctx, cancel := service.SignalContext(t.Context(), syscall.SIGTERM)
 	defer cancel()
 
-	lis, err := new(net.ListenConfig).Listen(ctx, "tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	require.NoError(t, lis.Close())
+	addr := testutil.FreeTCPAddr(t)
 
 	log := logger.ForTests(logger.TestLoggerWriteToTB(t))
 	sleep := new(sleepServer)
 	sleep.delay.Store(int64(10 * time.Millisecond))
 
-	cfg := customGRPCSettings{Address: lis.Addr().String()}
+	cfg := customGRPCSettings{Address: addr}
 	srv, err := NewServer(cfg, log,
 		RegisterServices(
 			func(server *Server) {
@@ -92,14 +89,12 @@ func Test_GRPCServer_With_TLS(t *testing.T) {
 	ctx, cancel := service.SignalContext(t.Context(), syscall.SIGTERM)
 	defer cancel()
 
-	lis, err := new(net.ListenConfig).Listen(ctx, "tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	require.NoError(t, lis.Close())
+	addr := testutil.FreeTCPAddr(t)
 
 	log := logger.ForTests(logger.TestLoggerWriteToTB(t))
 
 	var cfg customGRPCSettings
-	cfg.Address = lis.Addr().String()
+	cfg.Address = addr
 	cfg.TLSConfig = new(config.TLS)
 	cfg.ShutdownTimeout = time.Second
 
@@ -143,9 +138,7 @@ func Test_GRPCServer_LogsShutdownCallback_Integration(t *testing.T) {
 	top, topCancel := context.WithCancel(t.Context())
 	defer topCancel()
 
-	lis, err := new(net.ListenConfig).Listen(top, "tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	require.NoError(t, lis.Close())
+	addr := testutil.FreeTCPAddr(t)
 
 	buf := logger.NewSyncBuffer()
 	log := logger.ForTests(
@@ -154,7 +147,7 @@ func Test_GRPCServer_LogsShutdownCallback_Integration(t *testing.T) {
 	)
 
 	cfg := customGRPCSettings{
-		Address: lis.Addr().String(),
+		Address: addr,
 		Network: config.Network{ShutdownTimeout: time.Millisecond},
 	}
 	srv, err := NewServer(cfg, log, ServiceName("custom-grpc"))
@@ -188,16 +181,14 @@ func Test_GRPCServer_UsesConfiguredShutdownTimeout_Integration(t *testing.T) {
 	ctx, cancel := service.SignalContext(t.Context(), syscall.SIGTERM)
 	defer cancel()
 
-	lis, err := new(net.ListenConfig).Listen(ctx, "tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	require.NoError(t, lis.Close())
+	addr := testutil.FreeTCPAddr(t)
 
 	log := logger.ForTests(logger.TestLoggerWriteToTB(t))
 	sleep := &sleepServer{started: make(chan struct{})}
 	sleep.delay.Store(int64(100 * time.Millisecond))
 
 	cfg := customGRPCSettings{
-		Address: lis.Addr().String(),
+		Address: addr,
 		Network: config.Network{
 			ShutdownTimeout: 250 * time.Millisecond,
 		},
@@ -254,15 +245,13 @@ func Test_GRPCServer_UsesDefaultShutdownTimeoutFallback_Integration(t *testing.T
 	ctx, cancel := service.SignalContext(t.Context(), syscall.SIGTERM)
 	defer cancel()
 
-	lis, err := new(net.ListenConfig).Listen(ctx, "tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	require.NoError(t, lis.Close())
+	addr := testutil.FreeTCPAddr(t)
 
 	log := logger.ForTests(logger.TestLoggerWriteToTB(t))
 	sleep := &sleepServer{started: make(chan struct{})}
 	sleep.delay.Store(int64(100 * time.Millisecond))
 
-	cfg := customGRPCSettings{Address: lis.Addr().String()}
+	cfg := customGRPCSettings{Address: addr}
 	srv, err := NewServer(cfg, log, RegisterServices(
 		func(server *Server) { server.RegisterService(&sleepServiceDesc, sleep) },
 	))
@@ -324,13 +313,11 @@ func Test_GRPCServer_OpenTelemetryPropagation_Integration(t *testing.T) {
 	ctx, cancel := service.SignalContext(t.Context(), syscall.SIGTERM)
 	defer cancel()
 
-	lis, err := new(net.ListenConfig).Listen(ctx, "tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	require.NoError(t, lis.Close())
+	addr := testutil.FreeTCPAddr(t)
 
 	log := logger.ForTests(logger.TestLoggerWriteToTB(t))
 
-	cfg := customGRPCSettings{Address: lis.Addr().String()}
+	cfg := customGRPCSettings{Address: addr}
 	srv, err := NewServer(cfg, log,
 		WithOpenTelemetry(),
 		RegisterServices(func(server *Server) {
@@ -394,16 +381,14 @@ func Test_GRPCServer_ForcesStopWhenShutdownTimeoutExceeded_Integration(t *testin
 	ctx, cancel := service.SignalContext(t.Context(), syscall.SIGTERM)
 	defer cancel()
 
-	lis, err := new(net.ListenConfig).Listen(ctx, "tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	require.NoError(t, lis.Close())
+	addr := testutil.FreeTCPAddr(t)
 
 	log := logger.ForTests(logger.TestLoggerWriteToTB(t))
 	sleep := &sleepServer{started: make(chan struct{})}
 	sleep.delay.Store(int64(time.Second))
 
 	cfg := customGRPCSettings{
-		Address: lis.Addr().String(),
+		Address: addr,
 		Network: config.Network{
 			ShutdownTimeout: 20 * time.Millisecond,
 		},
