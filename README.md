@@ -231,6 +231,10 @@ logger:
 
 ops:
   address: ":8090"
+  enabled: true
+  metrics_enabled: true
+  profile_enabled: false
+  exp_vars_enabled: false
   version_enabled: true
 
 tracer:
@@ -373,26 +377,30 @@ then the derived env names look like:
 
 #### `OPS_*`
 
-| Env                       | Default          | Meaning                                      |
-|---------------------------|------------------|----------------------------------------------|
-| `OPS_ADDRESS`             | `:8090`          | Listen address for the OPS server.           |
-| `OPS_METRICS_PATH`        | `/metrics`       | Prometheus metrics endpoint path.            |
-| `OPS_PROFILE_PATH`        | `/debug/pprof`   | Base path for `pprof` handlers.              |
-| `OPS_EXP_VARS_PATH`       | `/debug/vars`    | `expvar` endpoint path.                      |
-| `OPS_VERSION_PATH`        | `/version`       | Version endpoint path.                       |
-| `OPS_VERSION_ENABLED`     | `false`          | Enables the version endpoint.                |
-| `OPS_READ_TIMEOUT`        | `0`              | HTTP read timeout for the OPS server.        |
-| `OPS_WRITE_TIMEOUT`       | `0`              | HTTP write timeout for the OPS server.       |
-| `OPS_READ_HEADER_TIMEOUT` | `0`              | HTTP read-header timeout for the OPS server. |
-| `OPS_IDLE_TIMEOUT`        | `0`              | HTTP idle timeout for the OPS server.        |
-| `OPS_SHUTDOWN_TIMEOUT`    | `30s`            | Graceful shutdown timeout.                   |
-| `OPS_MAX_HEADER_BYTES`    | `0`              | Max request header size.                     |
-| `OPS_TLS_ENABLED`         | `false`          | Enables TLS for the OPS server.              |
-| `OPS_TLS_CERT_FILE`       | empty            | TLS certificate path.                        |
-| `OPS_TLS_KEY_FILE`        | empty            | TLS private key path.                        |
-| `OPS_TLS_CLIENT_AUTH`     | `no-client-cert` | TLS client auth mode.                        |
-| `OPS_TLS_CA_CERT_FILE`    | empty            | CA certificate path for client verification. |
-| `OPS_TLS_MIN_VERSION`     | `TLS13`          | Minimum TLS version.                         |
+| Env                       | Default          | Meaning                                                               |
+|---------------------------|------------------|-----------------------------------------------------------------------|
+| `OPS_ADDRESS`             | `:8090`          | Listen address for the OPS server.                                    |
+| `OPS_ENABLED`             | `true`           | Enables the OPS server when at least one endpoint is enabled.         |
+| `OPS_METRICS_PATH`        | `/metrics`       | Prometheus metrics endpoint path.                                     |
+| `OPS_METRICS_ENABLED`     | `true`           | Enables the Prometheus metrics endpoint and runtime collector.        |
+| `OPS_PROFILE_PATH`        | `/debug/pprof`   | Base path for `pprof` handlers.                                       |
+| `OPS_PROFILE_ENABLED`     | `true`           | Enables `pprof` debugging endpoints.                                  |
+| `OPS_EXP_VARS_PATH`       | `/debug/vars`    | `expvar` endpoint path.                                               |
+| `OPS_EXP_VARS_ENABLED`    | `true`           | Enables the `expvar` endpoint.                                        |
+| `OPS_VERSION_PATH`        | `/version`       | Version endpoint path.                                                |
+| `OPS_VERSION_ENABLED`     | `false`          | Enables the version endpoint.                                         |
+| `OPS_READ_TIMEOUT`        | `0`              | HTTP read timeout for the OPS server.                                 |
+| `OPS_WRITE_TIMEOUT`       | `0`              | HTTP write timeout for the OPS server.                                |
+| `OPS_READ_HEADER_TIMEOUT` | `0`              | HTTP read-header timeout for the OPS server.                          |
+| `OPS_IDLE_TIMEOUT`        | `0`              | HTTP idle timeout for the OPS server.                                 |
+| `OPS_SHUTDOWN_TIMEOUT`    | `30s`            | Graceful shutdown timeout.                                            |
+| `OPS_MAX_HEADER_BYTES`    | `0`              | Max request header size.                                              |
+| `OPS_TLS_ENABLED`         | `false`          | Enables TLS for the OPS server.                                       |
+| `OPS_TLS_CERT_FILE`       | empty            | TLS certificate path.                                                 |
+| `OPS_TLS_KEY_FILE`        | empty            | TLS private key path.                                                 |
+| `OPS_TLS_CLIENT_AUTH`     | `no-client-cert` | TLS client auth mode.                                                 |
+| `OPS_TLS_CA_CERT_FILE`    | empty            | CA certificate path for client verification.                          |
+| `OPS_TLS_MIN_VERSION`     | `TLS13`          | Minimum TLS version.                                                  |
 | `OPS_TLS_CIPHER_SUITES`   | empty            | Cipher suites for TLS 1.0–1.2; rejected at startup if set together with `OPS_TLS_MIN_VERSION=TLS13`, since Go's TLS 1.3 stack ignores this setting. |
 
 #### `OTEL_*` from `config.TracerConfig`
@@ -558,6 +566,11 @@ Important behavior:
 
 The OPS server is a ready-to-run HTTP service for diagnostics and runtime observability.
 
+Keep the OPS port private to the pod or trusted internal network. `pprof` and `expvar`
+can expose runtime and process details, so do not publish this server through a public
+Service, ingress, or load balancer. Set `profile_enabled: false` and
+`exp_vars_enabled: false` when those diagnostics are not needed.
+
 ```go
 opsSvc, err := http.NewOPSServer(cfg.OpsServer, log)
 ```
@@ -568,6 +581,10 @@ By default, it exposes:
 - `/debug/pprof`
 - `/debug/vars`
 - `/version` when `version_enabled=true`
+
+Each endpoint family can be disabled independently with `metrics_enabled`,
+`profile_enabled`, and `exp_vars_enabled`. Set `enabled: false` to disable the OPS
+service entirely.
 
 It also exposes named pprof profiles under the same base path, for example:
 

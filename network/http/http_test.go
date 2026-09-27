@@ -13,7 +13,9 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/im-kulikov/gonfig"
@@ -25,6 +27,7 @@ import (
 
 	"github.com/im-kulikov/go-bones"
 	"github.com/im-kulikov/go-bones/config"
+	"github.com/im-kulikov/go-bones/internal"
 	"github.com/im-kulikov/go-bones/logger"
 )
 
@@ -34,6 +37,12 @@ type customHTTPSettings struct {
 }
 
 func (c customHTTPSettings) Addr() string { return c.Address }
+
+type pipeListenerOpener struct{ listener net.Listener }
+
+func (o pipeListenerOpener) Listen(context.Context, string, string) (net.Listener, error) {
+	return o.listener, nil
+}
 
 func Test_NewHTTPServer(t *testing.T) {
 	cfg := customHTTPSettings{Network: config.Network{TLSConfig: &config.TLS{Enabled: true}}}
@@ -63,6 +72,145 @@ func Test_serve_TLSConfigPresentButDisabled_UsesHTTPBranch(t *testing.T) {
 	require.ErrorIs(t, err, net.ErrClosed)
 	require.Contains(t, buf.String(), httpServerStarting)
 	require.NotContains(t, buf.String(), httpsServerStarting)
+}
+
+func TestServer_GracefulShutdown_WithInMemoryTransport(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		listener := newPipeListener()
+		requestStarted := make(chan struct{})
+		releaseRequest := make(chan struct{})
+
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+
+		cfg := customHTTPSettings{
+			Network: config.Network{ShutdownTimeout: time.Second},
+			Address: "pipe-listener",
+		}
+		svc, err := NewServer(
+			cfg,
+			logger.ForTests(logger.TestLoggerWriteToTB(t)),
+			func(options *serverOptions) { options.open = pipeListenerOpener{listener} },
+			ServerOptions(func(server *Server) {
+				server.Handler = HandlerFunc(func(w ResponseWriter, _ *Request) {
+					close(requestStarted)
+					<-releaseRequest
+					w.WriteHeader(StatusNoContent)
+				})
+			}),
+		)
+		require.NoError(t, err)
+
+		runDone := make(chan error, 1)
+		go func() { runDone <- svc.Start(ctx) }()
+
+		client := &Client{Transport: &Transport{DialContext: listener.DialContext}}
+		requestDone := make(chan error, 1)
+		go func() {
+			response, requestErr := client.Get("http://pipe-listener/")
+			if response != nil {
+				_ = response.Body.Close()
+			}
+			requestDone <- requestErr
+		}()
+
+		<-requestStarted
+		cancel()
+		synctest.Wait()
+
+		select {
+		case errRun := <-runDone:
+			require.Failf(t, "server stopped too early", "before the active request was released: %v", errRun)
+		default:
+		}
+
+		close(releaseRequest)
+		synctest.Wait()
+
+		require.NoError(t, <-requestDone)
+		require.NoError(t, <-runDone)
+	})
+}
+
+// TestServer_ShutdownTimeout_WithInMemoryTransport pins the configured (and
+// fallback) ShutdownTimeout exactly: with virtual time the server must keep
+// waiting for an active request until just before the deadline and must stop
+// once it expires, without adding any wall-clock delay to the suite.
+func TestServer_ShutdownTimeout_WithInMemoryTransport(t *testing.T) {
+	cases := []struct {
+		name    string
+		timeout time.Duration
+		expect  time.Duration
+	}{
+		{name: "configured timeout", timeout: 250 * time.Millisecond, expect: 250 * time.Millisecond},
+		{name: "zero timeout falls back to default", timeout: 0, expect: internal.FallbackTimeout(0)},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				listener := newPipeListener()
+				requestStarted := make(chan struct{})
+				releaseRequest := make(chan struct{})
+
+				var releaseOnce sync.Once
+				release := func() { releaseOnce.Do(func() { close(releaseRequest) }) }
+				defer release()
+
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+
+				cfg := customHTTPSettings{
+					Network: config.Network{ShutdownTimeout: tc.timeout},
+					Address: "pipe-listener",
+				}
+				svc, err := NewServer(
+					cfg,
+					logger.ForTests(logger.TestLoggerWriteToTB(t)),
+					func(options *serverOptions) { options.open = pipeListenerOpener{listener} },
+					ServerOptions(func(server *Server) {
+						server.Handler = HandlerFunc(func(w ResponseWriter, _ *Request) {
+							close(requestStarted)
+							<-releaseRequest
+							w.WriteHeader(StatusNoContent)
+						})
+					}),
+				)
+				require.NoError(t, err)
+
+				runDone := make(chan error, 1)
+				go func() { runDone <- svc.Start(ctx) }()
+
+				client := &Client{Transport: &Transport{
+					DialContext:       listener.DialContext,
+					DisableKeepAlives: true,
+				}}
+				requestDone := make(chan error, 1)
+				go func() {
+					response, requestErr := client.Get("http://pipe-listener/")
+					if response != nil {
+						_ = response.Body.Close()
+					}
+					requestDone <- requestErr
+				}()
+
+				<-requestStarted
+				cancel()
+
+				time.Sleep(tc.expect - time.Nanosecond)
+				synctest.Wait()
+				require.Empty(t, runDone, "server must keep waiting for the active request until the shutdown timeout")
+
+				time.Sleep(time.Nanosecond)
+				synctest.Wait()
+				require.Len(t, runDone, 1, "server must stop once the shutdown timeout expires")
+				require.NoError(t, <-runDone)
+
+				release()
+				require.NoError(t, <-requestDone)
+			})
+		})
+	}
 }
 
 func Test_newOpenTelemetryHandler(t *testing.T) {
@@ -166,7 +314,8 @@ func generateTLSKeyPair(t *testing.T) (string, string) {
 
 func newInsecureTLSClient() *Client {
 	transport := &Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
+		TLSClientConfig:   &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
+		DisableKeepAlives: true,
 	}
 
 	return &Client{Transport: transport}
@@ -179,6 +328,7 @@ func startHTTPRequest(done chan<- error, address string) {
 	}).String()
 
 	go func() {
+		client := &Client{Transport: &Transport{DisableKeepAlives: true}}
 		req, errReq := NewRequestWithContext(
 			context.Background(),
 			MethodGet,
@@ -190,7 +340,7 @@ func startHTTPRequest(done chan<- error, address string) {
 			return
 		}
 
-		res, errRes := DefaultClient.Do(req)
+		res, errRes := client.Do(req)
 		if errRes == nil {
 			_ = res.Body.Close()
 		}
@@ -223,6 +373,7 @@ func requireHTTPShutdownWithinBudget(
 	requestDone <-chan error,
 	requestFinished <-chan struct{},
 	cancelledAt time.Time,
+	releaseRequest func(),
 	budget time.Duration,
 ) {
 	t.Helper()
@@ -239,6 +390,8 @@ func requireHTTPShutdownWithinBudget(
 	case <-time.After(20 * time.Millisecond):
 		// server should still be waiting for the active request because ShutdownTimeout allows it
 	}
+
+	releaseRequest()
 
 	select {
 	case <-requestFinished:
@@ -262,6 +415,61 @@ func requireHTTPShutdownWithinBudget(
 		require.Fail(t, "server did not stop within configured shutdown timeout budget")
 	}
 }
+
+type pipeListener struct {
+	connections chan net.Conn
+	done        chan struct{}
+	closeOnce   sync.Once
+}
+
+func newPipeListener() *pipeListener {
+	return &pipeListener{
+		connections: make(chan net.Conn),
+		done:        make(chan struct{}),
+	}
+}
+
+func (l *pipeListener) Accept() (net.Conn, error) {
+	select {
+	case <-l.done:
+		return nil, net.ErrClosed
+	case conn := <-l.connections:
+		return conn, nil
+	}
+}
+
+func (l *pipeListener) Close() error {
+	l.closeOnce.Do(func() { close(l.done) })
+
+	return nil
+}
+
+func (*pipeListener) Addr() net.Addr { return pipeListenerAddr{} }
+
+func (l *pipeListener) DialContext(ctx context.Context, _, _ string) (net.Conn, error) {
+	server, client := net.Pipe()
+
+	select {
+	case <-ctx.Done():
+		_ = server.Close()
+		_ = client.Close()
+
+		return nil, ctx.Err()
+	case <-l.done:
+		_ = server.Close()
+		_ = client.Close()
+
+		return nil, net.ErrClosed
+	case l.connections <- server:
+		return client, nil
+	}
+}
+
+type pipeListenerAddr struct{}
+
+func (pipeListenerAddr) Network() string { return "pipe" }
+
+func (pipeListenerAddr) String() string { return "pipe-listener" }
 
 type fakeOpener struct {
 	onListen error

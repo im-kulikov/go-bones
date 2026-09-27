@@ -2,8 +2,8 @@ package http
 
 import (
 	"context"
-	"net"
 	"net/url"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -28,14 +28,12 @@ func Test_NewHTTPServer_With_TLS(t *testing.T) {
 	ctx, cancel := service.SignalContext(t.Context(), syscall.SIGTERM)
 	defer cancel()
 
-	lis, err := new(net.ListenConfig).Listen(ctx, "tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	require.NoError(t, lis.Close())
+	addr := testutil.FreeTCPAddr(t)
 
 	log := logger.ForTests(logger.TestLoggerWriteToTB(t))
 
 	var cfg customHTTPSettings
-	cfg.Address = lis.Addr().String()
+	cfg.Address = addr
 	cfg.TLSConfig = new(config.TLS)
 	cfg.ShutdownTimeout = time.Nanosecond
 
@@ -102,22 +100,24 @@ func Test_HTTPServer_ShutdownBehavior_Integration(t *testing.T) {
 		ctx, cancel := service.SignalContext(t.Context(), syscall.SIGTERM)
 		defer cancel()
 
-		lis, err := new(net.ListenConfig).Listen(ctx, "tcp", "127.0.0.1:0")
-		require.NoError(t, err)
-		require.NoError(t, lis.Close())
+		addr := testutil.FreeTCPAddr(t)
 
 		log := logger.ForTests(logger.TestLoggerWriteToTB(t))
 		cfg := customHTTPSettings{
 			Network: config.Network{ShutdownTimeout: 10 * time.Millisecond},
-			Address: lis.Addr().String(),
+			Address: addr,
 		}
+		requestStarted := make(chan struct{})
+		releaseRequest := make(chan struct{})
+		defer close(releaseRequest)
 
 		svc, err := NewServer(
 			cfg,
 			log,
 			ServerOptions(func(srv *Server) {
 				srv.Handler = HandlerFunc(func(ResponseWriter, *Request) {
-					time.Sleep(time.Second)
+					close(requestStarted)
+					<-releaseRequest
 				})
 			}),
 		)
@@ -135,12 +135,25 @@ func Test_HTTPServer_ShutdownBehavior_Integration(t *testing.T) {
 		req, err := NewRequestWithContext(runCtx, MethodGet, uri.String(), nil)
 		require.NoError(t, err)
 
-		cli := new(Client)
-		resp, err := cli.Do(req)
-		if resp != nil {
-			require.NoError(t, resp.Body.Close())
+		requestDone := make(chan error, 1)
+		go func() {
+			resp, requestErr := new(Client).Do(req)
+			if resp != nil {
+				_ = resp.Body.Close()
+			}
+
+			requestDone <- requestErr
+		}()
+
+		select {
+		case <-requestStarted:
+		case errReq := <-requestDone:
+			require.FailNowf(t, "request failed before reaching the handler", "%v", errReq)
+		case <-time.After(time.Second):
+			require.FailNow(t, "request did not reach the handler")
 		}
-		require.ErrorIs(t, err, context.DeadlineExceeded)
+
+		require.ErrorIs(t, <-requestDone, context.DeadlineExceeded)
 		assert.NoError(t, <-runDone)
 	})
 
@@ -148,26 +161,27 @@ func Test_HTTPServer_ShutdownBehavior_Integration(t *testing.T) {
 		ctx, cancel := service.SignalContext(t.Context(), syscall.SIGTERM)
 		defer cancel()
 
-		lis, err := new(net.ListenConfig).Listen(ctx, "tcp", "127.0.0.1:0")
-		require.NoError(t, err)
-		require.NoError(t, lis.Close())
+		addr := testutil.FreeTCPAddr(t)
 
 		log := logger.ForTests(logger.TestLoggerWriteToTB(t))
 		expect := 250 * time.Millisecond
 
 		cfg := customHTTPSettings{
 			Network: config.Network{ShutdownTimeout: expect},
-			Address: lis.Addr().String(),
+			Address: addr,
 		}
 
 		requestStarted := make(chan struct{})
 		requestFinished := make(chan struct{})
 		requestDone := make(chan error, 1)
+		releaseRequest := make(chan struct{})
+		var releaseOnce sync.Once
+		defer func() { releaseOnce.Do(func() { close(releaseRequest) }) }()
 
 		svc, err := NewServer(cfg, log, ServerOptions(func(server *Server) {
 			server.Handler = HandlerFunc(func(w ResponseWriter, r *Request) {
 				close(requestStarted)
-				time.Sleep(100 * time.Millisecond)
+				<-releaseRequest
 				w.WriteHeader(StatusNoContent)
 				close(requestFinished)
 			})
@@ -190,6 +204,7 @@ func Test_HTTPServer_ShutdownBehavior_Integration(t *testing.T) {
 			requestDone,
 			requestFinished,
 			cancelledAt,
+			func() { releaseOnce.Do(func() { close(releaseRequest) }) },
 			expect+150*time.Millisecond,
 		)
 	})
@@ -198,23 +213,24 @@ func Test_HTTPServer_ShutdownBehavior_Integration(t *testing.T) {
 		ctx, cancel := service.SignalContext(t.Context(), syscall.SIGTERM)
 		defer cancel()
 
-		lis, err := new(net.ListenConfig).Listen(ctx, "tcp", "127.0.0.1:0")
-		require.NoError(t, err)
-		require.NoError(t, lis.Close())
+		addr := testutil.FreeTCPAddr(t)
 
 		log := logger.ForTests(logger.TestLoggerWriteToTB(t))
 		cfg := customHTTPSettings{
 			Network: config.Network{ShutdownTimeout: 0},
-			Address: lis.Addr().String(),
+			Address: addr,
 		}
 
 		requestStarted := make(chan struct{})
 		requestDone := make(chan error, 1)
+		releaseRequest := make(chan struct{})
+		var releaseOnce sync.Once
+		defer func() { releaseOnce.Do(func() { close(releaseRequest) }) }()
 
 		svc, err := NewServer(cfg, log, ServerOptions(func(server *Server) {
 			server.Handler = HandlerFunc(func(w ResponseWriter, r *Request) {
 				close(requestStarted)
-				time.Sleep(100 * time.Millisecond)
+				<-releaseRequest
 				w.WriteHeader(StatusNoContent)
 			})
 		}))
@@ -228,6 +244,14 @@ func Test_HTTPServer_ShutdownBehavior_Integration(t *testing.T) {
 
 		<-requestStarted
 		cancel()
+
+		select {
+		case errDone := <-runDone:
+			require.Failf(t, "server stopped too early", "before active request was released: %v", errDone)
+		case <-time.After(20 * time.Millisecond):
+		}
+
+		releaseOnce.Do(func() { close(releaseRequest) })
 
 		select {
 		case errDone := <-requestDone:
@@ -251,6 +275,7 @@ func Test_HTTPServer_ShutdownBehavior_Integration(t *testing.T) {
 
 func Test_HTTPServer_OpenTelemetryPropagation_Integration(t *testing.T) {
 	testutil.RequireNetworkIntegration(t)
+	client := &Client{Transport: &Transport{DisableKeepAlives: true}}
 
 	prev := otel.GetTextMapPropagator()
 	otel.SetTextMapPropagator(propagation.TraceContext{})
@@ -263,12 +288,10 @@ func Test_HTTPServer_OpenTelemetryPropagation_Integration(t *testing.T) {
 	ctx, cancel := service.SignalContext(t.Context(), syscall.SIGTERM)
 	defer cancel()
 
-	lis, err := new(net.ListenConfig).Listen(ctx, "tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	require.NoError(t, lis.Close())
+	addr := testutil.FreeTCPAddr(t)
 
 	log := logger.ForTests(logger.TestLoggerWriteToTB(t))
-	cfg := customHTTPSettings{Address: lis.Addr().String()}
+	cfg := customHTTPSettings{Address: addr}
 
 	svc, err := NewServer(
 		cfg,
@@ -301,7 +324,7 @@ func Test_HTTPServer_OpenTelemetryPropagation_Integration(t *testing.T) {
 	parentCtx := trace.ContextWithSpanContext(context.Background(), parentSpanCtx)
 	otel.GetTextMapPropagator().Inject(parentCtx, propagationHeaderCarrier(req.Header))
 
-	resp, err := DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	require.NoError(t, err)
 	require.NoError(t, resp.Body.Close())
 	require.Equal(t, StatusNoContent, resp.StatusCode)

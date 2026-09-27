@@ -112,16 +112,24 @@ BuildInfo is empty
 //
 // Usage: Typically mounted on routes like "/version" or "/debug/version"
 // for health checks, deployment verification, and operational monitoring.
-func version(w ResponseWriter, r *Request) {
-	switch r.URL.Query().Get("format") {
-	case "json":
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(StatusOK)
-		_ = json.NewEncoder(w).Encode(buildInfo)
-	default:
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(StatusOK)
-		_ = versionTpl.Execute(w, buildInfo)
+func version(log *logger.Logger) HandlerFunc {
+	return func(w ResponseWriter, r *Request) {
+		switch r.URL.Query().Get("format") {
+		case "json":
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(StatusOK)
+
+			if err := json.NewEncoder(w).Encode(buildInfo); err != nil {
+				log.ErrorContext(r.Context(), "could not write version response", logger.Err(err))
+			}
+		default:
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.WriteHeader(StatusOK)
+
+			if err := versionTpl.Execute(w, buildInfo); err != nil {
+				log.ErrorContext(r.Context(), "could not write version response", logger.Err(err))
+			}
+		}
 	}
 }
 
@@ -152,13 +160,23 @@ func RegisterMetrics(cs ...prometheus.Collector) error {
 	return nil
 }
 
+// registryCompareAndSwap is a seam over registry.CompareAndSwap so a test can
+// deterministically simulate losing the race (another goroutine's CAS
+// winning first), instead of relying on actually scheduling enough
+// concurrent goroutines to make that outcome likely.
+//
+//nolint:gochecknoglobals
+var registryCompareAndSwap = func(next *prometheus.Registry) bool {
+	return registry.CompareAndSwap(nil, next)
+}
+
 // getRegistry returns the process-wide OPS registry, initializing it on first use.
 func getRegistry() *prometheus.Registry {
 	if r := registry.Load(); r != nil {
 		return r
 	}
 
-	if next := prometheus.NewRegistry(); registry.CompareAndSwap(nil, next) {
+	if next := prometheus.NewRegistry(); registryCompareAndSwap(next) {
 		return next
 	}
 
@@ -187,8 +205,11 @@ func registerRuntimeMetrics() error {
 
 // NewOPSServer creates an HTTP service exposing monitoring and debugging endpoints.
 // It sets up the following handlers:
+//
 //   - Prometheus metrics endpoint
+//
 //   - Expvar variables endpoint
+//
 //   - `pprof` debugging endpoints (index, cmdline, profile, symbol, trace, and
 //     any named runtime profiles such as goroutine, heap, or goroutineleak when available)
 //
@@ -198,28 +219,13 @@ func registerRuntimeMetrics() error {
 //
 // Returns a configured HTTP server as a service.Service interface and any error encountered during setup.
 func NewOPSServer(cfg config.Ops, log *logger.Logger) (service.Service, error) {
-	mux := NewServeMux()
-
-	// OPS intentionally serves Prometheus/runtime diagnostics independently of
-	// any OTEL metrics pipeline, so applications can choose one or both paths.
-	if err := registerRuntimeMetrics(); err != nil {
-		return nil, err
+	if !cfg.IsEnabled() {
+		return nil, nil
 	}
 
-	reg := getRegistry()
-	mux.Handle(cfg.MetricsPath, promhttp.InstrumentMetricHandler(
-		reg, promhttp.HandlerFor(reg, promhttp.HandlerOpts{}),
-	))
-
-	// prepare exp variables handlers
-	mux.Handle(cfg.ExpVarsPath, expvar.Handler())
-
-	// prepare pprof handlers
-	registerPprofHandlers(mux, cfg.ProfilePath)
-
-	// version handler
-	if cfg.VersionEnabled {
-		mux.HandleFunc(cfg.VersionPath, version)
+	handler, err := newOPSHandler(cfg, log)
+	if err != nil {
+		return nil, err
 	}
 
 	return NewServer(
@@ -227,7 +233,43 @@ func NewOPSServer(cfg config.Ops, log *logger.Logger) (service.Service, error) {
 		log,
 		ServiceName(defaultOPSServiceName),
 		ServerOptions(func(srv *Server) {
-			srv.Handler = mux
+			srv.Handler = handler
 		}),
 	)
+}
+
+// newOPSHandler builds the OPS endpoint mux independently from HTTP listener
+// lifecycle, so endpoint behavior can be tested without a network socket.
+func newOPSHandler(cfg config.Ops, log *logger.Logger) (Handler, error) {
+	mux := NewServeMux()
+
+	if cfg.MetricsEnabled {
+		// OPS intentionally serves Prometheus/runtime diagnostics independently of
+		// any OTEL metrics pipeline, so applications can choose one or both paths.
+		if err := registerRuntimeMetrics(); err != nil {
+			return nil, err
+		}
+
+		reg := getRegistry()
+		mux.Handle(cfg.MetricsPath, promhttp.InstrumentMetricHandler(
+			reg, promhttp.HandlerFor(reg, promhttp.HandlerOpts{}),
+		))
+	}
+
+	// prepare exp variables handlers
+	if cfg.ExpVarsEnabled {
+		mux.Handle(cfg.ExpVarsPath, expvar.Handler())
+	}
+
+	// prepare pprof handlers
+	if cfg.ProfileEnabled {
+		registerPprofHandlers(mux, cfg.ProfilePath)
+	}
+
+	// version handler
+	if cfg.VersionEnabled {
+		mux.HandleFunc(cfg.VersionPath, version(log))
+	}
+
+	return mux, nil
 }
