@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"expvar"
+	"fmt"
 	"net/http/pprof" // #nosec G108
 	"runtime/debug"
 	rprof "runtime/pprof" // #nosec G108
@@ -14,6 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/im-kulikov/go-bones"
 	"github.com/im-kulikov/go-bones/config"
 	"github.com/im-kulikov/go-bones/logger"
 	"github.com/im-kulikov/go-bones/service"
@@ -160,6 +162,10 @@ func RegisterMetrics(cs ...prometheus.Collector) error {
 	return nil
 }
 
+// ErrOPSRouteConflict is returned by NewOPSServer when two enabled OPS endpoints
+// are configured on conflicting paths.
+const ErrOPSRouteConflict bones.Error = "conflicting OPS endpoint paths"
+
 // registryCompareAndSwap is a seam over registry.CompareAndSwap so a test can
 // deterministically simulate losing the race (another goroutine's CAS
 // winning first), instead of relying on actually scheduling enough
@@ -237,6 +243,18 @@ func registerHealthMetrics(reader any) error {
 //   - opts: optional OPS settings such as WithHealth
 //
 // Returns a configured HTTP server as a service.Service interface and any error encountered during setup.
+//
+// NewOPSServer returns a nil service and a nil error when the OPS server is
+// disabled: cfg.Enabled is false, or every endpoint switch (MetricsEnabled,
+// ProfileEnabled, ExpVarsEnabled, VersionEnabled, HealthEnabled) is false.
+// The switches default to true only through their struct tags, i.e. when cfg is
+// loaded with gonfig (config.Load / gonfig.SetDefaults). A config.Ops built as a
+// struct literal, such as config.Ops{Address: ":8090"}, therefore yields no OPS
+// server; apply gonfig.SetDefaults first or set the switches explicitly. A nil
+// service is skipped by service.WithService.
+//
+// ErrOPSRouteConflict is returned when two enabled endpoints are configured on
+// conflicting paths, e.g. two health probes on one path or a probe on MetricsPath.
 func NewOPSServer(cfg config.Ops, log *logger.Logger, opts ...OPSOption) (service.Service, error) {
 	if !cfg.IsEnabled() {
 		return nil, nil
@@ -271,7 +289,16 @@ func newOPSOptions(opts ...OPSOption) opsOptions {
 
 // newOPSHandler builds the OPS endpoint mux independently from HTTP listener
 // lifecycle, so endpoint behavior can be tested without a network socket.
-func newOPSHandler(cfg config.Ops, log *logger.Logger, opts ...OPSOption) (Handler, error) {
+func newOPSHandler(cfg config.Ops, log *logger.Logger, opts ...OPSOption) (_ Handler, err error) {
+	// ServeMux panics when two patterns conflict, e.g. two probes on one path or
+	// a probe on MetricsPath. The paths come from config, so report that as an
+	// error instead of crashing the process.
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("%w: %v", ErrOPSRouteConflict, r)
+		}
+	}()
+
 	if log == nil {
 		log = logger.Default()
 	}

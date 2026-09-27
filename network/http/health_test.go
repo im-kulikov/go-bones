@@ -419,3 +419,55 @@ func TestHealthEndpoints_RootPath(t *testing.T) {
 		"a configured root path must not be replaced with the default")
 	require.Equal(t, StatusOK, call(t, h, MethodGet, "/readyz").code)
 }
+
+func TestHealthEndpoints_DuplicatePaths(t *testing.T) {
+	cases := [][3]string{
+		{"/", "/", "/healthz"},
+		{"/health", "/health/", "/healthz"},
+		{"/livez", "/readyz", "/livez"},
+	}
+
+	cfg := opsConfig(t)
+	cfg.VersionEnabled, cfg.LivePath = true, cfg.VersionPath
+	require.NotPanics(t, func() {
+		_, err := NewOPSServer(cfg, logger.ForTests())
+		require.ErrorIs(t, err, ErrOPSRouteConflict, "health path collides with /version")
+	})
+
+	for _, paths := range cases {
+		cfg := opsConfig(t)
+		cfg.LivePath, cfg.ReadyPath, cfg.HealthPath = paths[0], paths[1], paths[2]
+
+		require.NotPanics(t, func() {
+			_, err := NewOPSServer(cfg, logger.ForTests())
+			require.ErrorIs(t, err, ErrOPSRouteConflict, "%v", paths)
+		})
+	}
+}
+
+func TestHealthEndpoints_SingleCheckFollowsMonitorState(t *testing.T) {
+	passing := health.Result{Name: "db", Impact: health.Readiness, Status: health.StatusPassing}
+
+	stopped := fakeReader{snap: snapshotOf(false, false, passing)}
+	h, err := newOPSHandler(opsConfig(t), logger.ForTests(), WithHealth(stopped))
+	require.NoError(t, err)
+
+	res := call(t, h, MethodGet, "/readyz/db")
+	require.Equal(t, StatusServiceUnavailable, res.code)
+	require.Equal(t, "[-]monitor failed: not running\n", res.body)
+
+	draining := fakeReader{snap: snapshotOf(true, true, passing)}
+	h, err = newOPSHandler(opsConfig(t), logger.ForTests(), WithHealth(draining))
+	require.NoError(t, err)
+
+	res = call(t, h, MethodGet, "/readyz/db")
+	require.Equal(t, StatusServiceUnavailable, res.code)
+	require.Equal(t, "[-]draining failed: shutting down\n", res.body)
+
+	live := health.Result{Name: "worker", Impact: health.Liveness, Status: health.StatusPassing}
+	h, err = newOPSHandler(opsConfig(t), logger.ForTests(),
+		WithHealth(fakeReader{snap: snapshotOf(true, true, live)}))
+	require.NoError(t, err)
+	require.Equal(t, StatusOK, call(t, h, MethodGet, "/livez/worker").code,
+		"draining does not affect liveness")
+}

@@ -104,3 +104,25 @@ func Test_secretTransformer_MasksAttrsFromCustomTransformers(t *testing.T) {
 	require.NotContains(t, buf.String(), "custom secret")
 	require.Contains(t, buf.String(), "my-password=REDACTED")
 }
+
+// Custom transformers run after the OTel bridge has emitted the record, so the
+// attributes they add never reach the exporter, masked or not.
+func Test_secretTransformer_CustomAttrsAreNotExported(t *testing.T) {
+	processor := new(captureProcessor)
+	installOTelLogProvider(t, processor)
+	SetOpenTelemetryBridge(true)
+
+	addSecret := slogTransformerFunc(func(_ context.Context, record Record) Record {
+		record.AddAttrs(String("my-password", "custom secret"))
+		return record
+	})
+	log := New(
+		config.Logger{Secrets: []string{"my-password"}},
+		slog.NewTextHandler(new(bytes.Buffer), nil),
+		addSecret,
+	)
+	log.Info("hello world")
+
+	require.Len(t, processor.records, 1)
+	require.NotContains(t, processor.records[0].Attributes, "my-password")
+}

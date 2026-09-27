@@ -279,9 +279,23 @@ func (h *healthHandlers) single(kind probe, base string) HandlerFunc {
 	return func(w ResponseWriter, r *Request) {
 		name := strings.TrimPrefix(r.URL.Path, prefix)
 
-		res, ok := h.reader.Snapshot().Checks[name]
+		snap := h.reader.Snapshot()
+
+		res, ok := snap.Checks[name]
 		if !ok || name == "" || !relevant(kind, res) {
 			h.writeText(w, r, StatusNotFound, "check not found\n")
+
+			return
+		}
+
+		// Agree with the aggregate probes on monitor-level state.
+		switch {
+		case !snap.Running:
+			h.writeText(w, r, StatusServiceUnavailable, "[-]monitor failed: not running\n")
+
+			return
+		case kind == probeReady && snap.Draining:
+			h.writeText(w, r, StatusServiceUnavailable, "[-]draining failed: shutting down\n")
 
 			return
 		}
