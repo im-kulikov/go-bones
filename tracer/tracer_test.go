@@ -270,6 +270,12 @@ func TestInit_InsecureRemoteEndpointWarning(t *testing.T) {
 			noLeak:   []string{"t0k3n"},
 		},
 		{
+			name:     "redacts an opaque endpoint with credentials",
+			endpoint: "http:user:s3cr3t",
+			wantWarn: "host=[redacted]",
+			noLeak:   []string{"s3cr3t"},
+		},
+		{
 			name:     "no warning when env endpoint is local and config endpoint is remote",
 			endpoint: "collector.example.com:4317",
 			env:      map[string]string{envOTELExporterOTLPEndpoint: "http://localhost:4318"},
@@ -1153,5 +1159,27 @@ func protoValue(value *commonpb.AnyValue) string {
 		return string(typed.BytesValue)
 	default:
 		return value.String()
+	}
+}
+
+func TestEndpointHost(t *testing.T) {
+	cases := map[string]string{
+		"":                                  "",
+		"localhost":                         "localhost",
+		"localhost:4317":                    "localhost",
+		"collector.example.com:4317":        "collector.example.com",
+		"http://collector.example.com:4318": "collector.example.com",
+		"https://user:s3cr3t@host:4318/v1":  "host",
+		"::1":                               "::1",
+		"[::1]":                             "[::1]",
+		"https://[::1]:4318":                "::1",
+		"http:user:s3cr3t":                  "[redacted]",
+		"t0k3n@collector:4317":              "[redacted]",
+		"collector?token=t0k3n":             "[redacted]",
+		"https://user:s3cr3t@":              "[redacted]",
+	}
+
+	for in, want := range cases {
+		require.Equal(t, want, endpointHost(in), in)
 	}
 }

@@ -55,6 +55,10 @@ const (
 
 	// ErrGRPCCheckListener indicates a failure during the initialization of the gRPC listener.
 	ErrGRPCCheckListener bones.Error = "grpc check listener"
+
+	// ErrGRPCHealthRegistered is returned by NewServer when WithHealth is used
+	// and grpc.health.v1.Health is also registered via RegisterServices.
+	ErrGRPCHealthRegistered bones.Error = "grpc health service is already registered"
 )
 
 // ServiceName sets the lifecycle/logging name used by the wrapped service launcher.
@@ -172,7 +176,9 @@ func prepareServer(
 	}
 
 	// after user callbacks, so every registered service gets a health status
-	options.health.register(options.grpc)
+	if err = options.health.register(options.grpc); err != nil {
+		return nil, err
+	}
 
 	return options, nil
 }

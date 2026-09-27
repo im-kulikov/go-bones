@@ -161,26 +161,29 @@ func exportedSignals(cfg config.TracerConfig) []string {
 }
 
 // endpointHost extracts the host from both host:port (cfg.Endpoint) and URL
-// (OTEL_EXPORTER_OTLP_*_ENDPOINT) forms. Only the host is safe to log: a URL
-// may carry credentials in userinfo or query parameters.
+// (OTEL_EXPORTER_OTLP_*_ENDPOINT) forms. Only the host is safe to log: an
+// endpoint may carry credentials in userinfo, query or opaque parts. Anything
+// that is not an IP address or a DNS name is returned as "[redacted]".
 func endpointHost(endpoint string) string {
+	host := endpoint
 	if u, err := url.Parse(endpoint); err == nil && u.Host != "" {
-		return u.Hostname()
+		host = u.Hostname()
+	} else if h, _, errSplit := net.SplitHostPort(endpoint); errSplit == nil {
+		host = h
 	}
 
-	// A scheme-less "token@host:port" splits into host "token@host": never log it.
-	host, _, err := net.SplitHostPort(endpoint)
-	if err == nil && !strings.ContainsAny(host, "@?#/") {
+	if host == "" || net.ParseIP(strings.Trim(host, "[]")) != nil || isDNSName(host) {
 		return host
 	}
 
-	// A bare host ("localhost", "::1") is safe; anything URL-shaped that did
-	// not yield a host may still carry userinfo or query tokens.
-	if strings.ContainsAny(endpoint, "@?#/") {
-		return "[redacted]"
-	}
+	return "[redacted]"
+}
 
-	return endpoint
+// isDNSName reports whether s consists only of characters valid in a host name.
+func isDNSName(s string) bool {
+	const hostChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_"
+
+	return strings.Trim(s, hostChars) == ""
 }
 
 // isLocalEndpoint reports whether endpoint points to the local host;

@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	gogrpc "google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	grpchealth "google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/test/bufconn"
 
@@ -179,4 +180,15 @@ func TestBoundOK(t *testing.T) {
 
 	snap.Live = false
 	require.False(t, boundOK(snap, []string{"db"}))
+}
+
+func TestGRPCHealth_AlreadyRegistered(t *testing.T) {
+	require.NotPanics(t, func() {
+		_, err := NewServer(customGRPCSettings{Address: "127.0.0.1:0"}, logger.ForTests(),
+			WithHealth(health.New(config.Health{}, logger.ForTests())),
+			RegisterServices(func(s *Server) {
+				healthpb.RegisterHealthServer(s, grpchealth.NewServer())
+			}))
+		require.ErrorIs(t, err, ErrGRPCHealthRegistered)
+	})
 }

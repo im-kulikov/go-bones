@@ -67,15 +67,23 @@ type healthSync struct {
 }
 
 // register attaches the health service to srv. It is a no-op without a reader.
-func (h *healthSync) register(srv *Server) {
+// WithHealth and a health service registered via RegisterServices are mutually
+// exclusive: gRPC panics on a duplicate service, so that is reported as an error.
+func (h *healthSync) register(srv *Server) error {
 	if h == nil || h.reader == nil {
-		return
+		return nil
+	}
+
+	if _, ok := srv.GetServiceInfo()[healthpb.Health_ServiceDesc.ServiceName]; ok {
+		return ErrGRPCHealthRegistered
 	}
 
 	h.grpc = srv
 	h.server = grpchealth.NewServer()
 	healthpb.RegisterHealthServer(srv, h.server)
 	h.sync()
+
+	return nil
 }
 
 // start performs the first sync and follows events until the returned stop is called.
