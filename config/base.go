@@ -15,6 +15,7 @@ type Base struct {
 	Logger    Logger       `env:"LOGGER" yaml:"logger" json:"logger" toml:"logger"`
 	OpsServer Ops          `env:"OPS"    yaml:"ops"    json:"ops"    toml:"ops"`
 	Tracer    TracerConfig `env:"OTEL"   yaml:"tracer" json:"tracer" toml:"tracer"`
+	Health    Health       `env:"HEALTH" yaml:"health" json:"health" toml:"health"`
 }
 
 type appSettings struct {
