@@ -15,14 +15,6 @@ import "github.com/im-kulikov/go-bones/config"
 func prepareTransformers(cfg config.Logger, transformers ...slogTransformer) []slogTransformer {
 	var out []slogTransformer
 
-	// Add a transformer for secret masking if secrets are configured.
-	if len(cfg.Secrets) > 0 {
-		secrets := new(secretTransformer)
-		secrets.apply(cfg.Secrets)
-
-		out = append(out, secrets)
-	}
-
 	// Add a transformer to include context metadata in log records.
 	out = append(out, slogTransformerFunc(contextTransformer))
 
@@ -36,6 +28,14 @@ func prepareTransformers(cfg config.Logger, transformers ...slogTransformer) []s
 
 	// Add any additional custom transformers provided by the caller.
 	out = append(out, transformers...)
+
+	// Add a transformer for secret masking if secrets are configured.
+	if len(cfg.Secrets) > 0 {
+		secrets := new(secretTransformer)
+		secrets.apply(cfg.Secrets)
+
+		out = append(out, secrets)
+	}
 
 	return out
 }

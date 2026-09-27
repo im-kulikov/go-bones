@@ -36,3 +36,9 @@ func Test_NoneNamed(t *testing.T) {
 
 	require.NotContains(t, buf.String(), "[service]")
 }
+
+func Test_NamedNilUsesDefault(t *testing.T) {
+	require.NotPanics(t, func() {
+		Named(nil, "service").Info("hello world")
+	})
+}

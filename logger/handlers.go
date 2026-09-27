@@ -128,12 +128,16 @@ func (h *wrappedHandler) Handle(ctx context.Context, original Record) error {
 // Named assigns a name-based prefix to the log messages if the handler supports NamedLogger.
 //
 // Parameters:
-//   - log: The logger for which the prefix is to be set.
+//   - log: The logger for which the prefix is to be set. If nil, Default is used.
 //   - name: The name to use as the prefix.
 //
 // Returns:
 //   - A new Logger instance with the prefix applied.
 func Named(log *Logger, name ...string) *Logger {
+	if log == nil {
+		log = Default()
+	}
+
 	if handler, ok := log.Handler().(NamedLogger); ok {
 		return newLogger(handler.Named(name...))
 	}
@@ -162,7 +166,7 @@ func (h *wrappedHandler) Named(names ...string) Handler {
 		conf: h.conf,
 		next: h.next,
 		list: h.list,
-		name: append(h.name, items...),
+		name: append(slices.Clone(h.name), items...),
 	}
 }
 
