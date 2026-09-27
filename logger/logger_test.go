@@ -47,7 +47,7 @@ level=INFO msg=test3 error="test error"
 level=INFO msg=test3 err="test error"
 level=INFO msg="[service] message from some service" key=value
 level=ERROR msg="tracing message" error="context canceled" ctxKey=ctxVal trace.span_id=0200000000000000 trace.trace_id=01000000000000000000000000000000
-level=INFO msg="message with multi attributes" String=string-value Int64=9223372036854775807 Int=9223372036854775807 Uint64=18446744073709551615 Float64=1.7976931348623157e+308 Bool=true Time=1970-01-01T03:01:40.000+03:00 Duration=1s Any=val`
+level=INFO msg="message with multi attributes" String=string-value Int64=9223372036854775807 Int=9223372036854775807 Uint64=18446744073709551615 Float64=1.7976931348623157e+308 Bool=true Time=REDACTED Duration=1s Any=val`
 
 func attrsToMap(attributes []attribute.KeyValue) map[attribute.Key]any {
 	out := make(map[attribute.Key]any, len(attributes))

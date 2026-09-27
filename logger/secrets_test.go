@@ -126,3 +126,42 @@ func Test_secretTransformer_CustomAttrsAreNotExported(t *testing.T) {
 	require.Len(t, processor.records, 1)
 	require.NotContains(t, processor.records[0].Attributes, "my-password")
 }
+
+type secretLogValuer struct{}
+
+func (secretLogValuer) LogValue() slog.Value {
+	return slog.GroupValue(slog.String("my-password", "valuer secret"))
+}
+
+func Test_secretTransformer_MasksLogValuerGroups(t *testing.T) {
+	processor := new(captureProcessor)
+	installOTelLogProvider(t, processor)
+	SetOpenTelemetryBridge(true)
+	t.Cleanup(func() { SetOpenTelemetryBridge(false) })
+
+	buf := new(bytes.Buffer)
+	log := New(config.Logger{Secrets: []string{"my-password"}}, slog.NewTextHandler(buf, nil))
+	log.Info("hello world", "user", secretLogValuer{})
+
+	require.NotContains(t, buf.String(), "valuer secret")
+	require.Contains(t, buf.String(), "user.my-password=REDACTED")
+
+	require.Len(t, processor.records, 1)
+	require.NotContains(t, fmt.Sprint(processor.records[0].Attributes), "valuer secret")
+}
+
+func Test_secretTransformer_MasksWithAttrs(t *testing.T) {
+	buf := new(bytes.Buffer)
+	log := New(config.Logger{Secrets: []string{"my-password"}}, slog.NewTextHandler(buf, nil))
+	log.With("my-password", "with secret", slog.Group("user", "my-password", "group secret")).
+		WithGroup("req").
+		With("my-password", "grouped with secret").
+		Info("hello world")
+
+	out := buf.String()
+	require.NotContains(t, out, "with secret")
+	require.NotContains(t, out, "group secret")
+	require.Contains(t, out, "my-password=REDACTED")
+	require.Contains(t, out, "user.my-password=REDACTED")
+	require.Contains(t, out, "req.my-password=REDACTED")
+}

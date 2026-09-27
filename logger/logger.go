@@ -29,6 +29,9 @@ func prepareTransformers(cfg config.Logger, transformers ...slogTransformer) []s
 	}
 
 	// Emit records into OTel Logs when the bridge is enabled process-wide.
+	// Exporters emit the record as it is at this step, so attributes added by the
+	// custom transformers below are never exported to OTel (masked or not).
+	// See .github/instructions/logger.instructions.md.
 	out = append(out, newOpenTelemetryBridge())
 
 	// Add an OpenTracing transformer if tracing is enabled.

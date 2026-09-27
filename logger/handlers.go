@@ -86,9 +86,29 @@ func (h *wrappedHandler) Enabled(ctx context.Context, level Level) bool {
 func (h *wrappedHandler) WithAttrs(attrs []Attr) Handler {
 	return &wrappedHandler{
 		conf: h.conf,
-		next: h.next.WithAttrs(attrs),
+		next: h.next.WithAttrs(h.redactAttrs(attrs)),
 		list: slices.Clone(h.list),
 	}
+}
+
+// redactAttrs masks secrets in attributes bound via Logger.With. Such attributes
+// go straight to the next handler and never pass through the transformers list.
+func (h *wrappedHandler) redactAttrs(attrs []Attr) []Attr {
+	for _, item := range h.list {
+		secrets, ok := item.(*secretTransformer)
+		if !ok {
+			continue
+		}
+
+		out := make([]Attr, len(attrs))
+		for i, attr := range attrs {
+			out[i] = secrets.redactAttr(attr)
+		}
+
+		return out
+	}
+
+	return attrs
 }
 
 // WithGroup returns a new wrapped handler appending the specified group name
