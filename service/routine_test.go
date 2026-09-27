@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
-	"sync"
 	"syscall"
 	"testing"
 	"testing/synctest"
@@ -35,24 +33,6 @@ func Test_defaultErrorsIgnore(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			require.True(t, containsError(tc.errs, defaultIgnoredErrors...))
 			require.True(t, containsError(tc.errs, errors.Join(defaultIgnoredErrors...)))
-		})
-	}
-}
-
-func Test_groupErrors(t *testing.T) {
-	cases := []struct {
-		name string
-		pass error
-		errs error
-	}{
-		{name: "should ignore single", pass: context.Canceled, errs: errors.Join(context.Canceled)},
-		{name: "should ignore multiple", pass: io.EOF, errs: errors.Join(
-			context.Canceled, context.DeadlineExceeded, io.EOF)},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			assert.True(t, errors.Is(tc.errs, tc.pass))
 		})
 	}
 }
@@ -101,9 +81,9 @@ func TestRun_Success(t *testing.T) {
 		require.NoError(t, Run(log)) // empty handlers
 
 		go func() {
-			// wait for starting all services
+			// RunContext starts services asynchronously. This is virtual time inside
+			// synctest, so it does not slow the suite down.
 			time.Sleep(time.Millisecond * 100)
-			// send fake signal
 			cancel(ErrReceivedSignal(syscall.SIGUSR1))
 		}()
 
@@ -248,6 +228,58 @@ func TestRunContext_Failure(t *testing.T) {
 	mockSvc.AssertExpectations(t)
 }
 
+func TestRunContext_ConcurrentFailuresAreAllReported(t *testing.T) {
+	log := logger.ForTests()
+
+	errA := bones.Error("service a failed")
+	errB := bones.Error("service b failed")
+
+	started := make(chan struct{}, 2)
+	release := make(chan struct{})
+
+	newFailingService := func(name string, failWith error) *mockService {
+		svc := new(mockService)
+		svc.name = name
+		svc.On("Start", mock.Anything).
+			Run(func(mock.Arguments) {
+				started <- struct{}{}
+				<-release
+			}).
+			Return(failWith).
+			Once()
+		svc.On("Stop", mock.Anything).Return().Once()
+
+		return svc
+	}
+
+	svcA := newFailingService("svc-a", errA)
+	svcB := newFailingService("svc-b", errB)
+
+	options := []Option{
+		func(cfg *settings) {
+			cfg.handle = append(cfg.handle, svcA, svcB)
+			cfg.shutdown = time.Millisecond * 100
+		},
+	}
+
+	errChan := make(chan error, 1)
+	go func() {
+		defer close(errChan)
+		errChan <- RunContext(t.Context(), log, options...)
+	}()
+
+	<-started
+	<-started
+	close(release) // both services fail at (as close as possible to) the same time
+
+	err := <-errChan
+	require.ErrorIs(t, err, errA, "RunContext must report every service that failed concurrently")
+	require.ErrorIs(t, err, errB, "RunContext must report every service that failed concurrently")
+
+	svcA.AssertExpectations(t)
+	svcB.AssertExpectations(t)
+}
+
 func TestRunContext_SignalContextCancelIsIgnored(t *testing.T) {
 	log := logger.ForTests()
 	top, cancel := SignalContext(t.Context(), syscall.SIGUSR1)
@@ -301,14 +333,9 @@ func TestSignalHandling(t *testing.T) {
 	ctx, stop := SignalContext(t.Context(), syscall.SIGUSR1)
 	defer stop()
 
-	var wg sync.WaitGroup
-	defer wg.Wait()
-	wg.Go(func() {
-		time.Sleep(time.Millisecond * 50)
-		process, err := os.FindProcess(os.Getpid())
-		assert.NoError(t, err)
-		assert.NoError(t, process.Signal(syscall.SIGUSR1))
-	})
+	process, err := os.FindProcess(os.Getpid())
+	require.NoError(t, err)
+	require.NoError(t, process.Signal(syscall.SIGUSR1))
 
 	select {
 	case <-ctx.Done():

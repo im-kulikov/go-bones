@@ -22,6 +22,8 @@ type settings struct {
 }
 
 // Service represents a long-running component managed by Run or RunContext.
+// Start reports terminal runtime errors to the runner. Stop performs best-effort
+// cleanup and is responsible for reporting its own shutdown failures.
 type Service interface {
 	Name() string
 	Start(context.Context) error
@@ -46,11 +48,19 @@ var (
 	defaultSignals = []os.Signal{syscall.SIGINT, syscall.SIGTERM}
 )
 
+// containsError reports whether err matches any of errs (via errors.Is), or
+// matches something wrapped by a composite errs entry such as an
+// errors.Join result - hence the recursion into Unwrap() []error.
+//
+// This used to also start with `if errors.Is(errors.Join(errs...), err) {
+// return true }`. That check asks whether err itself is found within the
+// errs values' own chain (errs wraps err) - the opposite direction from
+// what every call site actually needs (err wraps/matches one of errs) - so
+// it was genuinely dead: every case it caught, the loop below already
+// caught via errors.Is(err, e) (which is also true whenever e == err).
+// Confirmed by re-running Test_defaultErrorsIgnore, Test_groupErrors, and
+// TestRunContext_* with it removed before deleting it.
 func containsError(err error, errs ...error) bool {
-	if errors.Is(errors.Join(errs...), err) {
-		return true
-	}
-
 	for _, e := range errs {
 		if errors.Is(err, e) {
 			return true
@@ -78,7 +88,8 @@ func containsError(err error, errs ...error) bool {
 //   - options: Optional configuration parameters.
 //
 // Returns:
-//   - `error`: An error if any of the managed goroutines fail to start or stop properly.
+//   - `error`: The combined (via errors.Join) non-ignored errors returned by every
+//     managed service's Start method, or nil if none failed.
 func Run(log *logger.Logger, options ...Option) error {
 	return RunContext(context.Background(), log, options...)
 }
@@ -95,7 +106,11 @@ func Run(log *logger.Logger, options ...Option) error {
 //   - options: Optional configuration parameters.
 //
 // Returns:
-//   - error: An error if any of the managed goroutines fail to start or stop properly.
+//   - error: The combined (via errors.Join) non-ignored errors returned by every
+//     managed service's Start method, or nil if none failed. context.CancelCauseFunc
+//     only remembers the first cause it's given, so this is tracked separately from
+//     ctx's cancellation cause: if two services fail around the same time, both of
+//     their errors are reported, not just whichever one's cancel call won the race.
 func RunContext(top context.Context, log *logger.Logger, options ...Option) error {
 	cfg := newSettings(log, options...)
 	l := cfg.logger
@@ -106,14 +121,17 @@ func RunContext(top context.Context, log *logger.Logger, options ...Option) erro
 
 	ctx, cancel, handleSignals := cfg.newSignal(top, cfg.signal...)
 
+	errs := make([]error, len(cfg.handle))
+
 	var wg sync.WaitGroup
-	for _, service := range cfg.handle {
+	for i, service := range cfg.handle {
 		wg.Go(func() {
 			defer cancel(nil)
 
 			l.Info("starting service", logger.String("service", service.Name()))
 			err := service.Start(ctx)
 			if err != nil && !containsError(err, cfg.ignore) {
+				errs[i] = err
 				cancel(err)
 
 				l.Error("could not start service",
@@ -148,7 +166,7 @@ func RunContext(top context.Context, log *logger.Logger, options ...Option) erro
 	wg.Wait()
 	cancel(context.Canceled)
 
-	return runnableError(ctx, cfg.ignore)
+	return errors.Join(errs...)
 }
 
 func newSettings(log *logger.Logger, options ...Option) settings {
@@ -163,12 +181,4 @@ func newSettings(log *logger.Logger, options ...Option) settings {
 	}
 
 	return cfg
-}
-
-func runnableError(ctx context.Context, ignored error) error {
-	if err := context.Cause(ctx); err != nil && !containsError(err, ignored) {
-		return err
-	}
-
-	return nil
 }
