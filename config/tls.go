@@ -2,8 +2,9 @@ package config
 
 import (
 	"crypto/tls"
-	"errors"
+	"crypto/x509"
 	"fmt"
+	"os"
 
 	"github.com/im-kulikov/go-bones"
 )
@@ -35,6 +36,15 @@ const (
 
 	// ErrTLSLoadX509KeyPair fires when could not load tls.X509KeyPair.
 	ErrTLSLoadX509KeyPair bones.Error = "could not load X509 key pair"
+
+	// ErrMTLSRequiresCACertFile fires when ca_cert_file is empty but client auth requires it.
+	ErrMTLSRequiresCACertFile bones.Error = "mTLS requires ca_cert_file"
+
+	// ErrCipherSuitesIneffectiveAtTLS13 fires when cipher_suites is set together with
+	// min_version=TLS13: Go's TLS 1.3 stack uses its own fixed, non-configurable
+	// cipher suite set and silently ignores tls.Config.CipherSuites, so the setting
+	// would give a false sense of control over the negotiated cipher.
+	ErrCipherSuitesIneffectiveAtTLS13 bones.Error = "cipher_suites has no effect at TLS 1.3"
 )
 
 // nolint:gochecknoglobals
@@ -54,6 +64,38 @@ var tlsVersions = map[string]uint16{
 	"TLS10": tls.VersionTLS10,
 }
 
+func cipherSuiteIDs(names []string) ([]uint16, error) {
+	if len(names) == 0 {
+		return nil, nil // use Go's secure default cipher suite set
+	}
+
+	known := make(map[string]uint16, len(tls.CipherSuites()))
+	for _, suite := range tls.CipherSuites() {
+		known[suite.Name] = suite.ID
+	}
+
+	ids := make([]uint16, 0, len(names))
+	for _, name := range names {
+		id, ok := known[name]
+		if !ok {
+			return nil, fmt.Errorf("unknown or unsupported TLS cipher suite %q", name)
+		}
+
+		ids = append(ids, id)
+	}
+
+	return ids, nil
+}
+
+func validateClientCA(authType tls.ClientAuthType, caFile string) error {
+	requireCA := authType == tls.VerifyClientCertIfGiven || authType == tls.RequireAndVerifyClientCert
+	if requireCA && caFile == "" {
+		return fmt.Errorf("%w: auth type = %q", ErrMTLSRequiresCACertFile, authType)
+	}
+
+	return nil
+}
+
 // Prepare initializes and returns a tls.Config based on the TLS settings, or an error if the configuration is invalid.
 func (c TLS) Prepare() (*tls.Config, error) {
 	if !c.Enabled {
@@ -70,27 +112,50 @@ func (c TLS) Prepare() (*tls.Config, error) {
 	}
 
 	var err error
-	if _, ok := tlsVersions[c.MinVersion]; !ok {
+	minVersion, ok := tlsVersions[c.MinVersion]
+	if !ok {
 		return nil, fmt.Errorf("%w: %s", ErrUnknownTLSVersion, c.MinVersion)
 	}
 
-	if _, ok := clientAuthMap[c.ClientAuth]; !ok {
+	if _, ok = clientAuthMap[c.ClientAuth]; !ok {
 		return nil, fmt.Errorf("%w: %s", ErrUnknownTLSClientAuth, c.ClientAuth)
+	}
+
+	if minVersion == tls.VersionTLS13 && len(c.CipherSuites) > 0 {
+		return nil, fmt.Errorf("%w: min_version=%s, cipher_suites=%v",
+			ErrCipherSuitesIneffectiveAtTLS13, c.MinVersion, c.CipherSuites)
 	}
 
 	var certificates [1]tls.Certificate
 	if certificates[0], err = tls.LoadX509KeyPair(c.CertFile, c.KeyFile); err != nil {
-		return nil, errors.Join(ErrTLSLoadX509KeyPair, err)
+		return nil, fmt.Errorf("%w: %w", ErrTLSLoadX509KeyPair, err)
 	}
 
-	var minVersion uint16 = tls.VersionTLS13
-	if tmp, ok := tlsVersions[c.MinVersion]; ok {
-		minVersion = tmp
-	}
-
-	return &tls.Config{
+	cfg := &tls.Config{
 		Certificates: certificates[:],
 		ClientAuth:   clientAuthMap[c.ClientAuth],
 		MinVersion:   minVersion,
-	}, nil
+	}
+
+	if cfg.CipherSuites, err = cipherSuiteIDs(c.CipherSuites); err != nil {
+		return nil, err
+	}
+
+	if err = validateClientCA(cfg.ClientAuth, c.CACertFile); err != nil {
+		return nil, err
+	} else if c.CACertFile == "" {
+		return cfg, nil
+	}
+
+	var pem []byte
+	if pem, err = os.ReadFile(c.CACertFile); err != nil {
+		return nil, fmt.Errorf("could not load client ca file (%q): %w", c.CACertFile, err)
+	}
+
+	cfg.ClientCAs = x509.NewCertPool()
+	if !cfg.ClientCAs.AppendCertsFromPEM(pem) {
+		return nil, fmt.Errorf("could not parse client ca: invalid PEM")
+	}
+
+	return cfg, nil
 }

@@ -393,7 +393,7 @@ then the derived env names look like:
 | `OPS_TLS_CLIENT_AUTH`     | `no-client-cert` | TLS client auth mode.                        |
 | `OPS_TLS_CA_CERT_FILE`    | empty            | CA certificate path for client verification. |
 | `OPS_TLS_MIN_VERSION`     | `TLS13`          | Minimum TLS version.                         |
-| `OPS_TLS_CIPHER_SUITES`   | empty            | Optional cipher suite list.                  |
+| `OPS_TLS_CIPHER_SUITES`   | empty            | Cipher suites for TLS 1.0–1.2; rejected at startup if set together with `OPS_TLS_MIN_VERSION=TLS13`, since Go's TLS 1.3 stack ignores this setting. |
 
 #### `OTEL_*` from `config.TracerConfig`
 
