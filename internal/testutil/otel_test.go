@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	otellog "go.opentelemetry.io/otel/log"
 	otellogglobal "go.opentelemetry.io/otel/log/global"
 	otellognoop "go.opentelemetry.io/otel/log/noop"
@@ -42,7 +43,7 @@ func TestInstallOTelRecorder(t *testing.T) {
 		span.End()
 
 		record := new(otellog.Record)
-		record.SetBody(otellog.StringValue("demo-log"))
+		record.SetBody(attribute.StringValue("demo-log"))
 		otellogglobal.GetLoggerProvider().Logger("testutil/otel").Emit(ctx, *record)
 
 		gotSpan, ok := recorder.FindSpan("demo-span")
