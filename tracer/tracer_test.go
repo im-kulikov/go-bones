@@ -196,12 +196,13 @@ func TestInit_InsecureRemoteEndpointWarning(t *testing.T) {
 		endpoint string
 		sendAll  bool // SendMetrics and SendLogs
 		env      map[string]string
-		wantWarn string // endpoint expected in the warning, empty means no warning
+		wantWarn string // host expected in the warning, empty means no warning
+		noLeak   []string
 	}{
 		{
 			name:     "warns on insecure remote endpoint",
 			endpoint: "collector.example.com:4317",
-			wantWarn: "collector.example.com:4317",
+			wantWarn: "host=collector.example.com",
 		},
 		{name: "no warning for local endpoint", endpoint: "localhost:4317"},
 		{
@@ -215,14 +216,14 @@ func TestInit_InsecureRemoteEndpointWarning(t *testing.T) {
 			env: map[string]string{
 				envOTELExporterOTLPEndpoint: "http://collector.example.com:4318",
 			},
-			wantWarn: "http://collector.example.com:4318",
+			wantWarn: "host=collector.example.com",
 		},
 		{
 			name: "warns when only one signal endpoint is remote",
 			env: map[string]string{
 				envOTELExporterOTLPTracesEndpoint: "collector.example.com:4317",
 			},
-			wantWarn: "collector.example.com:4317",
+			wantWarn: "host=collector.example.com",
 		},
 		{
 			name: "no warning for a remote endpoint of a signal that is not exported",
@@ -238,7 +239,15 @@ func TestInit_InsecureRemoteEndpointWarning(t *testing.T) {
 				envOTELExporterOTLPMetricsEndpoint: "metrics.example.com:4317",
 				envOTELExporterOTLPLogsEndpoint:    "logs.example.com:4317",
 			},
-			wantWarn: "logs.example.com:4317",
+			wantWarn: "host=logs.example.com",
+		},
+		{
+			name: "logs only the host of an endpoint URL with credentials",
+			env: map[string]string{
+				envOTELExporterOTLPEndpoint: "https://user:s3cr3t@collector.example.com:4318/v1?token=t0k3n",
+			},
+			wantWarn: "host=collector.example.com",
+			noLeak:   []string{"s3cr3t", "t0k3n", "user"},
 		},
 		{
 			name:     "no warning when env endpoint is local and config endpoint is remote",
@@ -269,6 +278,9 @@ func TestInit_InsecureRemoteEndpointWarning(t *testing.T) {
 			if tc.wantWarn != "" {
 				require.Contains(t, buf.String(), "insecure")
 				require.Contains(t, buf.String(), tc.wantWarn)
+				for _, secret := range tc.noLeak {
+					require.NotContains(t, buf.String(), secret)
+				}
 			} else {
 				require.NotContains(t, buf.String(), "insecure")
 			}

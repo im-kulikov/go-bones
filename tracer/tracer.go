@@ -140,7 +140,7 @@ func warnIfInsecureWithRemoteEndpoint(l *logger.Logger, cfg config.TracerConfig)
 			l.Warn("OTLP insecure fallback is enabled for a non-local endpoint; "+
 				"telemetry will be sent without TLS",
 				logger.String("signal", signal),
-				logger.String("endpoint", endpoint))
+				logger.String("host", endpointHost(endpoint)))
 		}
 	}
 }
@@ -160,18 +160,25 @@ func exportedSignals(cfg config.TracerConfig) []string {
 	return signals
 }
 
-// isLocalEndpoint reports whether endpoint points to the local host. It accepts
-// both host:port (cfg.Endpoint) and URL (OTEL_EXPORTER_OTLP_*_ENDPOINT) forms;
-// an empty endpoint means the exporter default, which is localhost.
-func isLocalEndpoint(endpoint string) bool {
-	host := endpoint
+// endpointHost extracts the host from both host:port (cfg.Endpoint) and URL
+// (OTEL_EXPORTER_OTLP_*_ENDPOINT) forms. Only the host is safe to log: a URL
+// may carry credentials in userinfo or query parameters.
+func endpointHost(endpoint string) string {
 	if u, err := url.Parse(endpoint); err == nil && u.Host != "" {
-		host = u.Hostname()
-	} else if h, _, errSplit := net.SplitHostPort(endpoint); errSplit == nil {
-		host = h
+		return u.Hostname()
 	}
 
-	switch host {
+	if host, _, err := net.SplitHostPort(endpoint); err == nil {
+		return host
+	}
+
+	return endpoint
+}
+
+// isLocalEndpoint reports whether endpoint points to the local host;
+// an empty endpoint means the exporter default, which is localhost.
+func isLocalEndpoint(endpoint string) bool {
+	switch endpointHost(endpoint) {
 	case "localhost", "127.0.0.1", "::1", "":
 		return true
 	default:
