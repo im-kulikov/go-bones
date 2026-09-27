@@ -203,6 +203,22 @@ func registerRuntimeMetrics() error {
 	return nil
 }
 
+// registerHealthMetrics registers a health reader that is also a Prometheus
+// collector. A collector that is already registered is not an error.
+func registerHealthMetrics(reader any) error {
+	collector, ok := reader.(prometheus.Collector)
+	if !ok {
+		return nil
+	}
+
+	err := RegisterMetrics(collector)
+	if _, ok := errors.AsType[prometheus.AlreadyRegisteredError](err); ok {
+		return nil
+	}
+
+	return err
+}
+
 // NewOPSServer creates an HTTP service exposing monitoring and debugging endpoints.
 // It sets up the following handlers:
 //
@@ -213,17 +229,20 @@ func registerRuntimeMetrics() error {
 //   - `pprof` debugging endpoints (index, cmdline, profile, symbol, trace, and
 //     any named runtime profiles such as goroutine, heap, or goroutineleak when available)
 //
+//   - health probes /livez, /readyz and /healthz (see WithHealth)
+//
 // Parameters:
 //   - cfg: Configuration for the operations server
 //   - log: Logger instance for server operations
+//   - opts: optional OPS settings such as WithHealth
 //
 // Returns a configured HTTP server as a service.Service interface and any error encountered during setup.
-func NewOPSServer(cfg config.Ops, log *logger.Logger) (service.Service, error) {
+func NewOPSServer(cfg config.Ops, log *logger.Logger, opts ...OPSOption) (service.Service, error) {
 	if !cfg.IsEnabled() {
 		return nil, nil
 	}
 
-	handler, err := newOPSHandler(cfg, log)
+	handler, err := newOPSHandler(cfg, log, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -240,13 +259,24 @@ func NewOPSServer(cfg config.Ops, log *logger.Logger) (service.Service, error) {
 
 // newOPSHandler builds the OPS endpoint mux independently from HTTP listener
 // lifecycle, so endpoint behavior can be tested without a network socket.
-func newOPSHandler(cfg config.Ops, log *logger.Logger) (Handler, error) {
+func newOPSHandler(cfg config.Ops, log *logger.Logger, opts ...OPSOption) (Handler, error) {
+	var options opsOptions
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&options)
+		}
+	}
+
 	mux := NewServeMux()
 
 	if cfg.MetricsEnabled {
 		// OPS intentionally serves Prometheus/runtime diagnostics independently of
 		// any OTEL metrics pipeline, so applications can choose one or both paths.
 		if err := registerRuntimeMetrics(); err != nil {
+			return nil, err
+		}
+
+		if err := registerHealthMetrics(options.health); err != nil {
 			return nil, err
 		}
 
@@ -269,6 +299,12 @@ func newOPSHandler(cfg config.Ops, log *logger.Logger) (Handler, error) {
 	// version handler
 	if cfg.VersionEnabled {
 		mux.HandleFunc(cfg.VersionPath, version(log))
+	}
+
+	// health probes
+	if cfg.HealthEnabled {
+		paths := opsHealthPaths{live: cfg.LivePath, ready: cfg.ReadyPath, health: cfg.HealthPath}
+		registerHealthHandlers(mux, paths.withDefaults(), options.health, log)
 	}
 
 	return mux, nil

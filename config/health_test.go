@@ -29,4 +29,11 @@ func TestHealth_TagDefaultsMatchConstants(t *testing.T) {
 	var cfg Health
 	require.NoError(t, gonfig.SetDefaults(&cfg))
 	require.Equal(t, cfg.WithDefaults(), cfg, "struct tag defaults and WithDefaults must agree")
+
+	var ops Ops
+	require.NoError(t, gonfig.SetDefaults(&ops))
+	require.True(t, ops.HealthEnabled)
+	require.Equal(t, "/livez", ops.LivePath)
+	require.Equal(t, "/readyz", ops.ReadyPath)
+	require.Equal(t, "/healthz", ops.HealthPath)
 }

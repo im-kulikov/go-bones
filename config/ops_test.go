@@ -92,6 +92,14 @@ func TestOps_IsEnabled(t *testing.T) {
 			},
 			want: true,
 		},
+		{
+			name: "health_enabled",
+			cfg: Ops{
+				Enabled:       true,
+				HealthEnabled: true,
+			},
+			want: true,
+		},
 	}
 
 	for _, tt := range tests {

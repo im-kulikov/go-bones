@@ -19,6 +19,12 @@ type Ops struct {
 
 	VersionPath    string `yaml:"version_path"    env:"VERSION_PATH"    toml:"version_path"    json:"version_path"    default:"/version"`
 	VersionEnabled bool   `yaml:"version_enabled" env:"VERSION_ENABLED" toml:"version_enabled" json:"version_enabled" default:"false"`
+
+	// HealthEnabled turns on /livez, /readyz and /healthz (see network/http.WithHealth).
+	HealthEnabled bool   `yaml:"health_enabled" env:"HEALTH_ENABLED" toml:"health_enabled" json:"health_enabled" default:"true"`
+	LivePath      string `yaml:"live_path"      env:"LIVE_PATH"      toml:"live_path"      json:"live_path"      default:"/livez"`
+	ReadyPath     string `yaml:"ready_path"     env:"READY_PATH"     toml:"ready_path"     json:"ready_path"     default:"/readyz"`
+	HealthPath    string `yaml:"health_path"    env:"HEALTH_PATH"    toml:"health_path"    json:"health_path"    default:"/healthz"`
 }
 
 // Addr returns the configured listen address.
@@ -27,5 +33,5 @@ func (c Ops) Addr() string { return c.Address }
 // IsEnabled reports whether the OPS server and at least one of its endpoints are enabled.
 func (c Ops) IsEnabled() bool {
 	return c.Enabled &&
-		(c.MetricsEnabled || c.ProfileEnabled || c.ExpVarsEnabled || c.VersionEnabled)
+		(c.MetricsEnabled || c.ProfileEnabled || c.ExpVarsEnabled || c.VersionEnabled || c.HealthEnabled)
 }
