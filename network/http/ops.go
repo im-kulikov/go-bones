@@ -223,13 +223,11 @@ func registerHealthMetrics(reader any) error {
 		return err
 	}
 
-	if are.ExistingCollector == collector {
-		return nil
-	}
-
-	// Another Monitor with the same metric set is registered (e.g. a previous
-	// app instance in this process): replace it, otherwise the new monitor's
-	// metrics would never be exported.
+	// A collector with the same metric set is registered (e.g. a previous app
+	// instance in this process): replace it, otherwise the new reader's metrics
+	// would never be exported. Collectors are not compared with ==: a
+	// non-comparable dynamic type would panic, and re-registering the same
+	// collector is harmless.
 	getRegistry().Unregister(are.ExistingCollector)
 
 	return RegisterMetrics(collector)

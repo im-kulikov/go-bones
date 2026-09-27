@@ -495,3 +495,21 @@ func TestRegisterHealthMetrics_ReplacesPreviousCollector(t *testing.T) {
 	require.True(t, ok)
 	require.Same(t, second, are.ExistingCollector, "new collector must replace the previous one")
 }
+
+// mapCollector is non-comparable: == on two values of it panics at runtime.
+type mapCollector map[string]int
+
+func (mapCollector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- prometheus.NewDesc("go_bones_map_stub_metric", "stub", nil, nil)
+}
+
+func (mapCollector) Collect(chan<- prometheus.Metric) {}
+
+func TestRegisterHealthMetrics_NonComparableCollector(t *testing.T) {
+	resetOpsRegistry(t)
+
+	require.NotPanics(t, func() {
+		require.NoError(t, registerHealthMetrics(mapCollector{}))
+		require.NoError(t, registerHealthMetrics(mapCollector{}))
+	})
+}

@@ -72,6 +72,9 @@ func WithLauncherLogger(log *logger.Logger) LauncherOption {
 // Stop canceled it or because it exited on its own. Hooks run synchronously in the
 // same goroutine as the callback, strictly after it returns, so they can never
 // observe or race with a still-executing callback.
+// Hooks get a context detached from Start's cancellation and deadline (it has
+// usually expired by then), so a hook doing blocking cleanup must bound it
+// itself; Stop never waits for hooks beyond its own ctx.
 // Nil callbacks are discarded to keep shutdown paths panic-free for optional hooks.
 func WithLauncherShutdownHooks(hook ...func(context.Context)) LauncherOption {
 	return func(l *launcher) {
