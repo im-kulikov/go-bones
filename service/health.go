@@ -168,6 +168,14 @@ func (g *settings) phasedRun(top context.Context) error {
 	serve, cancelServe := context.WithCancelCause(context.WithoutCancel(top))
 	last, cancelLast := context.WithCancelCause(context.WithoutCancel(top))
 
+	// serve and last are detached from top, so an already done top would
+	// otherwise start services with live contexts until the watcher below
+	// cancels them. Cancel them up front, as the classic path does.
+	if top.Err() != nil {
+		cancelServe(context.Cause(top))
+		cancelLast(context.Cause(top))
+	}
+
 	errs := make([]error, len(g.handle))
 
 	var wg sync.WaitGroup
@@ -211,7 +219,7 @@ func (g *settings) phasedRun(top context.Context) error {
 	stop(context.Canceled)
 	<-done
 
-	return errors.Join(errs...)
+	return g.result(top, errs)
 }
 
 // startService runs one service and reports a non-ignored error through stop.

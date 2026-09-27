@@ -196,7 +196,20 @@ func (g *settings) run(top context.Context) error {
 	wg.Wait()
 	cancel(context.Canceled)
 
-	return errors.Join(errs...)
+	return g.result(top, errs)
+}
+
+// result joins the service errors with the cancellation cause of top, unless
+// that cause is ignored or already reported by a service: a caller that cancels
+// RunContext with its own cause gets it back.
+func (g *settings) result(top context.Context, errs []error) error {
+	err := errors.Join(errs...)
+	if cause := context.Cause(top); cause != nil &&
+		!containsError(cause, g.ignore) && !errors.Is(err, cause) {
+		err = errors.Join(err, cause)
+	}
+
+	return err
 }
 
 func newSettings(log *logger.Logger, options ...Option) settings {

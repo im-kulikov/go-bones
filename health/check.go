@@ -82,8 +82,16 @@ func (m *Monitor) sweep(r *registration, now time.Time) time.Duration {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// Clear up before reading lastBeat: a Heartbeat.Beat that stores its
+	// timestamp after that read then sees up=false and records a success
+	// (after this sweep releases m.mu) instead of skipping it on the fast path
+	// and leaving a fresh heartbeat marked stale.
+	wasUp := r.up.Swap(false)
+
 	res := r.result
 	if res.Stale || !m.isStale(r, res, m.startedAt, now) {
+		r.up.Store(wasUp)
+
 		ref := latest(res.CheckedAt, r.lastBeatTime(), m.startedAt)
 
 		return max(window-now.Sub(ref), window/10, time.Millisecond)

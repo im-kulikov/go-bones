@@ -656,3 +656,24 @@ func TestStartStopRace(t *testing.T) {
 		require.Zero(t, lateCalls.Load(), "check ran after Stop returned")
 	}
 }
+
+func TestHeartbeat_LastSuccessFollowsBeats(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		m := newTestMonitor(t, testConfig())
+		hb, err := m.Heartbeat("worker", 5*time.Second)
+		require.NoError(t, err)
+
+		stop := start(t, m)
+		defer stop()
+
+		hb.Beat()
+		first := m.Snapshot().Checks["worker"].LastSuccess
+
+		time.Sleep(time.Second)
+		hb.Beat() // fast path: the check is already passing
+
+		res := m.Snapshot().Checks["worker"]
+		require.Equal(t, first.Add(time.Second), res.LastSuccess)
+		require.Equal(t, res.CheckedAt, res.LastSuccess)
+	})
+}

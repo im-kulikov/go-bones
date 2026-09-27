@@ -350,3 +350,72 @@ func TestNotifySignals(t *testing.T) {
 		t.Fatal("signal not delivered")
 	}
 }
+
+// ctxProbe records whether its context was already done when Start ran.
+type ctxProbe struct {
+	name       string
+	doneAtBoot bool
+}
+
+func (p *ctxProbe) Name() string { return p.name }
+
+func (p *ctxProbe) Start(ctx context.Context) error {
+	p.doneAtBoot = ctx.Err() != nil
+	<-ctx.Done()
+
+	return nil
+}
+
+func (p *ctxProbe) Stop(context.Context) {}
+
+func TestRunContext_CanceledParent(t *testing.T) {
+	phased := []struct {
+		name string
+		opts []Option
+	}{
+		{name: "classic"},
+		{name: "phased", opts: []Option{WithDrainDelay(time.Second)}},
+	}
+
+	for _, tc := range phased {
+		t.Run(tc.name+": services start with a canceled context", func(t *testing.T) {
+			// Real scheduler on purpose: the phased race depended on which
+			// goroutine ran first, so repeat it instead of using synctest.
+			for range 100 {
+				ctx, cancel := context.WithCancel(t.Context())
+				cancel()
+
+				probes := []*ctxProbe{{name: "a"}, {name: "b"}, {name: "c"}}
+				signals, _ := fakeSignals()
+				opts := append([]Option{
+					signals,
+					WithService(probes[0], probes[1], probes[2]),
+				}, tc.opts...)
+
+				require.NoError(t, RunContext(ctx, logger.ForTests(), opts...))
+
+				for _, p := range probes {
+					require.True(t, p.doneAtBoot, "%s: Start must not see a live context", p.name)
+				}
+			}
+		})
+
+		t.Run(tc.name+": a non-ignored parent cause is returned", func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				errAborted := errors.New("startup aborted")
+				ctx, cancel := context.WithCancelCause(t.Context())
+
+				signals, _ := fakeSignals()
+				opts := append([]Option{signals, WithService(&ctxProbe{name: "api"})}, tc.opts...)
+
+				done := make(chan error, 1)
+				go func() { done <- RunContext(ctx, logger.ForTests(), opts...) }()
+
+				synctest.Wait()
+				cancel(errAborted)
+
+				require.ErrorIs(t, <-done, errAborted)
+			})
+		})
+	}
+}

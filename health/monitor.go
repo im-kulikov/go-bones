@@ -381,8 +381,14 @@ func (m *Monitor) snapshotOf(st *state, now time.Time) Snapshot {
 			res.Stale = m.isStale(r, res, st.startedAt, now)
 		}
 
+		// Beat's fast path only stores lastBeat: overlay it, and count it as a
+		// success while the check is up.
 		if at := r.lastBeatTime(); at.After(res.CheckedAt) {
 			res.CheckedAt = at
+
+			if res.Up() {
+				res.LastSuccess = at
+			}
 		}
 
 		checks[r.name] = res
