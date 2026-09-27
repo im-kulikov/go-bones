@@ -165,3 +165,11 @@ func Test_secretTransformer_MasksWithAttrs(t *testing.T) {
 	require.Contains(t, out, "user.my-password=REDACTED")
 	require.Contains(t, out, "req.my-password=REDACTED")
 }
+
+func Test_secretTransformer_WithAttrsWithoutSecrets(t *testing.T) {
+	buf := new(bytes.Buffer)
+	log := New(config.Logger{}, slog.NewTextHandler(buf, nil))
+	log.With("my-password", "plain value").Info("hello world")
+
+	require.Contains(t, buf.String(), "my-password=\"plain value\"")
+}
