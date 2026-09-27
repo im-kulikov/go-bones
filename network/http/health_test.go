@@ -345,3 +345,77 @@ func TestResultMessage(t *testing.T) {
 		resultMessage(health.Result{Status: health.StatusFailing, Err: health.ErrTimeout}),
 	)
 }
+
+func TestHealthEndpoints_StaleUnknownLiveness(t *testing.T) {
+	// A heartbeat that never beat within its TTL is unknown and stale: the
+	// aggregate treats it as down, so every endpoint must agree.
+	reader := fakeReader{snap: snapshotOf(true, false, health.Result{
+		Name: "worker", Impact: health.Liveness, Status: health.StatusUnknown, Stale: true,
+	})}
+
+	h, err := newOPSHandler(opsConfig(t), logger.ForTests(), WithHealth(reader))
+	require.NoError(t, err)
+
+	res := call(t, h, MethodGet, "/livez?verbose")
+	require.Equal(t, StatusServiceUnavailable, res.code)
+	require.Contains(t, res.body, "[-]worker failed: stale")
+
+	res = call(t, h, MethodGet, "/livez")
+	require.Equal(t, StatusServiceUnavailable, res.code)
+	require.Contains(t, res.body, "[-]worker failed: stale")
+
+	res = call(t, h, MethodGet, "/livez/worker")
+	require.Equal(t, StatusServiceUnavailable, res.code)
+}
+
+func TestHealthEndpoints_TrailingSlashPaths(t *testing.T) {
+	cfg := opsConfig(t)
+	cfg.LivePath, cfg.ReadyPath = "/livez/", "/readyz/"
+
+	reader := fakeReader{snap: snapshotOf(true, false, health.Result{
+		Name: "worker", Impact: health.Liveness, Status: health.StatusPassing,
+	})}
+
+	var h Handler
+	require.NotPanics(t, func() {
+		var err error
+		h, err = newOPSHandler(cfg, logger.ForTests(), WithHealth(reader))
+		require.NoError(t, err)
+	})
+
+	require.Equal(t, StatusOK, call(t, h, MethodGet, "/livez").code)
+	require.Equal(t, StatusOK, call(t, h, MethodGet, "/readyz").code)
+	require.Equal(t, StatusOK, call(t, h, MethodGet, "/livez/worker").code)
+}
+
+func TestHealthEndpoints_NilLogger(t *testing.T) {
+	reader := fakeReader{snap: snapshotOf(true, false)}
+
+	h, err := newOPSHandler(opsConfig(t), nil, WithHealth(reader))
+	require.NoError(t, err)
+
+	require.NotPanics(t, func() {
+		h.ServeHTTP(new(failingWriter), httptest.NewRequest(MethodGet, "/livez", nil))
+	})
+}
+
+func TestHealthEndpoints_RootPath(t *testing.T) {
+	cfg := opsConfig(t)
+	cfg.LivePath = "/"
+
+	reader := fakeReader{snap: snapshotOf(true, false, health.Result{
+		Name: "worker", Impact: health.Liveness, Status: health.StatusPassing,
+	})}
+
+	h, err := newOPSHandler(cfg, logger.ForTests(), WithHealth(reader))
+	require.NoError(t, err)
+
+	res := call(t, h, MethodGet, "/?verbose")
+	require.Equal(t, StatusOK, res.code)
+	require.Contains(t, res.body, "livez check passed")
+
+	require.Equal(t, StatusOK, call(t, h, MethodGet, "/worker").code)
+	require.Equal(t, StatusNotFound, call(t, h, MethodGet, "/livez").code,
+		"a configured root path must not be replaced with the default")
+	require.Equal(t, StatusOK, call(t, h, MethodGet, "/readyz").code)
+}

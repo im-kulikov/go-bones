@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+
+	"github.com/im-kulikov/go-bones/config"
 )
 
 // logSecrets writes one record that carries a secret in every supported place:
@@ -82,4 +84,23 @@ func Test_secretTransformer_RunsBeforeExporters(t *testing.T) {
 			require.NotContains(t, exported, secret)
 		}
 	})
+}
+
+func Test_secretTransformer_MasksAttrsFromCustomTransformers(t *testing.T) {
+	buf := new(bytes.Buffer)
+	addSecret := slogTransformerFunc(func(_ context.Context, record Record) Record {
+		record.AddAttrs(String("my-password", "custom secret"))
+
+		return record
+	})
+
+	log := New(
+		config.Logger{Secrets: []string{"my-password"}},
+		slog.NewTextHandler(buf, nil),
+		addSecret,
+	)
+	log.Info("hello world")
+
+	require.NotContains(t, buf.String(), "custom secret")
+	require.Contains(t, buf.String(), "my-password=REDACTED")
 }

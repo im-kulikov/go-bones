@@ -20,8 +20,9 @@ func prepareTransformers(cfg config.Logger, transformers ...slogTransformer) []s
 
 	// Mask secrets right after context attributes are merged in and before any
 	// exporter (OTel log bridge, span events) sees the record.
+	var secrets *secretTransformer
 	if len(cfg.Secrets) > 0 {
-		secrets := new(secretTransformer)
+		secrets = new(secretTransformer)
 		secrets.apply(cfg.Secrets)
 
 		out = append(out, secrets)
@@ -37,6 +38,12 @@ func prepareTransformers(cfg config.Logger, transformers ...slogTransformer) []s
 
 	// Add any additional custom transformers provided by the caller.
 	out = append(out, transformers...)
+
+	// Custom transformers run after the mask above and may add attributes of
+	// their own, so mask once more for the final handler.
+	if secrets != nil && len(transformers) > 0 {
+		out = append(out, secrets)
+	}
 
 	return out
 }

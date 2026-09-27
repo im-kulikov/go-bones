@@ -608,6 +608,19 @@ Each endpoint family can be disabled independently with `metrics_enabled`,
 `profile_enabled`, and `exp_vars_enabled`. Set `enabled: false` to disable the OPS
 service entirely.
 
+These switches default to `true` only when the config is loaded through `gonfig`
+(`config.Load`, `gonfig.SetDefaults`). A `config.Ops` built as a struct literal has
+them all `false`, and `http.NewOPSServer` then returns a `nil` service. Set them
+explicitly or apply the defaults first:
+
+```go
+var ops config.Ops
+if err := gonfig.SetDefaults(&ops); err != nil {
+	return err
+}
+ops.Address = ":9090"
+```
+
 It also exposes named pprof profiles under the same base path, for example:
 
 - `/debug/pprof/goroutine`

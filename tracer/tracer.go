@@ -130,7 +130,7 @@ func warnIfInsecureWithRemoteEndpoint(l *logger.Logger, cfg config.TracerConfig)
 		return
 	}
 
-	for _, signal := range [...]string{"traces", "metrics", "logs"} {
+	for _, signal := range exportedSignals(cfg) {
 		endpoint, ok := lookupEndpointEnv(signal)
 		if !ok {
 			endpoint = cfg.Endpoint
@@ -143,6 +143,21 @@ func warnIfInsecureWithRemoteEndpoint(l *logger.Logger, cfg config.TracerConfig)
 				logger.String("endpoint", endpoint))
 		}
 	}
+}
+
+// exportedSignals lists the signals bootstrapProviders creates exporters for:
+// traces always, metrics and logs only when enabled.
+func exportedSignals(cfg config.TracerConfig) []string {
+	signals := []string{"traces"}
+	if cfg.SendMetrics {
+		signals = append(signals, "metrics")
+	}
+
+	if cfg.SendLogs {
+		signals = append(signals, "logs")
+	}
+
+	return signals
 }
 
 // isLocalEndpoint reports whether endpoint points to the local host. It accepts

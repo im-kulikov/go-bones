@@ -70,32 +70,50 @@ func registerHealthHandlers(
 
 	h := &healthHandlers{reader: reader, log: log}
 
-	mux.HandleFunc(cfg.live, h.guard(h.probe(probeLive, "livez")))
+	mux.HandleFunc(exactPattern(cfg.live), h.guard(h.probe(probeLive, "livez")))
 	mux.HandleFunc(strings.TrimSuffix(cfg.live, "/")+"/", h.guard(h.single(probeLive, cfg.live)))
-	mux.HandleFunc(cfg.ready, h.guard(h.probe(probeReady, "readyz")))
+	mux.HandleFunc(exactPattern(cfg.ready), h.guard(h.probe(probeReady, "readyz")))
 	mux.HandleFunc(strings.TrimSuffix(cfg.ready, "/")+"/", h.guard(h.single(probeReady, cfg.ready)))
-	mux.HandleFunc(cfg.health, h.guard(h.report))
+	mux.HandleFunc(exactPattern(cfg.health), h.guard(h.report))
 }
 
 type opsHealthPaths struct {
 	live, ready, health string
 }
 
-// withDefaults fills empty paths, so a config.Ops built in code still works.
+// withDefaults normalizes the paths and fills empty ones, so a config.Ops built
+// in code still works.
 func (p opsHealthPaths) withDefaults() opsHealthPaths {
-	if p.live == "" {
-		p.live = "/livez"
-	}
-
-	if p.ready == "" {
-		p.ready = "/readyz"
-	}
-
-	if p.health == "" {
-		p.health = "/healthz"
-	}
+	p.live = normalizePath(p.live, "/livez")
+	p.ready = normalizePath(p.ready, "/readyz")
+	p.health = normalizePath(p.health, "/healthz")
 
 	return p
+}
+
+// normalizePath drops trailing slashes, so "/livez/" is not registered twice
+// (exact and subtree route) and ServeMux does not panic. The root path "/" is
+// kept as is, an empty path falls back to def.
+func normalizePath(path, def string) string {
+	if path == "" {
+		return def
+	}
+
+	if trimmed := strings.TrimRight(path, "/"); trimmed != "" {
+		return trimmed
+	}
+
+	return "/"
+}
+
+// exactPattern returns a ServeMux pattern matching only path itself: "/" alone
+// is a catch-all, "/{$}" matches the root only.
+func exactPattern(path string) string {
+	if path == "/" {
+		return "/{$}"
+	}
+
+	return path
 }
 
 // guard allows only GET and HEAD and disables caching.
@@ -141,10 +159,12 @@ func relevant(kind probe, res health.Result) bool {
 	return kind == probeReady && res.Impact == health.Readiness
 }
 
-// checkOK mirrors health aggregation: an unknown liveness check is ok,
-// an unknown readiness check is not.
+// checkOK mirrors health aggregation: an unknown liveness check is ok unless it
+// is stale (e.g. a heartbeat that never beat within its TTL), an unknown
+// readiness check is not.
 func checkOK(res health.Result) bool {
-	return res.Up() || (res.Impact == health.Liveness && res.Status == health.StatusUnknown)
+	return res.Up() ||
+		(res.Impact == health.Liveness && res.Status == health.StatusUnknown && !res.Stale)
 }
 
 func statusCode(ok bool) int {

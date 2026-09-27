@@ -194,6 +194,7 @@ func TestInit_InsecureRemoteEndpointWarning(t *testing.T) {
 	cases := []struct {
 		name     string
 		endpoint string
+		sendAll  bool // SendMetrics and SendLogs
 		env      map[string]string
 		wantWarn string // endpoint expected in the warning, empty means no warning
 	}{
@@ -224,6 +225,22 @@ func TestInit_InsecureRemoteEndpointWarning(t *testing.T) {
 			wantWarn: "collector.example.com:4317",
 		},
 		{
+			name: "no warning for a remote endpoint of a signal that is not exported",
+			env: map[string]string{
+				envOTELExporterOTLPMetricsEndpoint: "collector.example.com:4317",
+				envOTELExporterOTLPLogsEndpoint:    "collector.example.com:4317",
+			},
+		},
+		{
+			name:    "warns for a remote endpoint of an exported metrics or logs signal",
+			sendAll: true,
+			env: map[string]string{
+				envOTELExporterOTLPMetricsEndpoint: "metrics.example.com:4317",
+				envOTELExporterOTLPLogsEndpoint:    "logs.example.com:4317",
+			},
+			wantWarn: "logs.example.com:4317",
+		},
+		{
 			name:     "no warning when env endpoint is local and config endpoint is remote",
 			endpoint: "collector.example.com:4317",
 			env:      map[string]string{envOTELExporterOTLPEndpoint: "http://localhost:4318"},
@@ -242,9 +259,11 @@ func TestInit_InsecureRemoteEndpointWarning(t *testing.T) {
 				logger.TestLoggerWriteToTB(t))
 
 			Init(log, config.TracerConfig{
-				Enabled:  true,
-				Insecure: true,
-				Endpoint: tc.endpoint,
+				Enabled:     true,
+				Insecure:    true,
+				Endpoint:    tc.endpoint,
+				SendMetrics: tc.sendAll,
+				SendLogs:    tc.sendAll,
 			})
 
 			if tc.wantWarn != "" {

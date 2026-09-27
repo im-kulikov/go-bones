@@ -1,6 +1,13 @@
 package config
 
 // Ops contains settings for OPS server.
+//
+// The *Enabled switches default to true only through their struct tags, i.e.
+// when the config is loaded with gonfig (config.Load / gonfig.SetDefaults). An
+// Ops built as a struct literal has them all false, so NewOPSServer returns a
+// nil service; set Enabled and the wanted endpoint switches explicitly, or
+// apply gonfig.SetDefaults before overriding fields.
+//
 // nolint:lll
 type Ops struct {
 	Network `yaml:",inline" env:",squash"`

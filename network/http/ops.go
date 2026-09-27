@@ -257,15 +257,26 @@ func NewOPSServer(cfg config.Ops, log *logger.Logger, opts ...OPSOption) (servic
 	)
 }
 
-// newOPSHandler builds the OPS endpoint mux independently from HTTP listener
-// lifecycle, so endpoint behavior can be tested without a network socket.
-func newOPSHandler(cfg config.Ops, log *logger.Logger, opts ...OPSOption) (Handler, error) {
+// newOPSOptions applies opts, skipping nil ones.
+func newOPSOptions(opts ...OPSOption) opsOptions {
 	var options opsOptions
 	for _, opt := range opts {
 		if opt != nil {
 			opt(&options)
 		}
 	}
+
+	return options
+}
+
+// newOPSHandler builds the OPS endpoint mux independently from HTTP listener
+// lifecycle, so endpoint behavior can be tested without a network socket.
+func newOPSHandler(cfg config.Ops, log *logger.Logger, opts ...OPSOption) (Handler, error) {
+	if log == nil {
+		log = logger.Default()
+	}
+
+	options := newOPSOptions(opts...)
 
 	mux := NewServeMux()
 
