@@ -23,6 +23,7 @@ The library is intentionally opinionated:
 - initialize logging once at startup
 - run long-lived components through `service.Run`
 - expose operational endpoints through the OPS server
+- report readiness and liveness through one non-blocking health monitor
 - prefer standard `OTEL_*` environment variables for telemetry configuration
 
 ## Contents
@@ -35,6 +36,7 @@ The library is intentionally opinionated:
 - [HTTP Service](#http-service)
 - [gRPC Service](#grpc-service)
 - [OPS Service](#ops-service)
+- [Health Checks](#health-checks)
 - [OpenTelemetry](#opentelemetry)
 - [Make Targets](#make-targets)
 
@@ -57,10 +59,8 @@ import (
 	"os"
 	"time"
 
-	"google.golang.org/grpc/health"
-	healthpb "google.golang.org/grpc/health/grpc_health_v1"
-
 	"github.com/im-kulikov/go-bones/config"
+	"github.com/im-kulikov/go-bones/health"
 	"github.com/im-kulikov/go-bones/logger"
 	"github.com/im-kulikov/go-bones/network/grpc"
 	"github.com/im-kulikov/go-bones/network/http"
@@ -106,6 +106,7 @@ func main() {
 
 	log := logger.Init(cfg.Logger)
 	telemetry := tracer.Init(log, cfg.Tracer)
+	hc := health.New(cfg.Health, log)
 
 	httpSvc, err := newHTTPService(cfg, log)
 	if err != nil {
@@ -113,13 +114,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	grpcSvc, err := newGRPCService(cfg, log)
+	grpcSvc, err := newGRPCService(cfg, log, hc)
 	if err != nil {
 		log.Error("build grpc service", logger.Err(err))
 		os.Exit(1)
 	}
 
-	opsSvc, err := http.NewOPSServer(cfg.OpsServer, log)
+	opsSvc, err := http.NewOPSServer(cfg.OpsServer, log, http.WithHealth(hc))
 	if err != nil {
 		log.Error("build ops service", logger.Err(err))
 		os.Exit(1)
@@ -127,6 +128,8 @@ func main() {
 
 	group := service.Compose(telemetry, opsSvc, httpSvc, grpcSvc)
 	if err = service.Run(log,
+		service.WithHealth(hc), // services implementing Check(ctx) error become readiness checks
+		service.WithDrainDelay(cfg.Health.DrainDelay),
 		service.WithShutdownTimeout(cfg.App.ShutdownTimeout),
 		service.WithService(group),
 	); err != nil && !errors.Is(err, context.Canceled) {
@@ -152,17 +155,13 @@ func newHTTPService(cfg appConfig, log *logger.Logger) (service.Service, error) 
 	)
 }
 
-func newGRPCService(cfg appConfig, log *logger.Logger) (service.Service, error) {
+func newGRPCService(cfg appConfig, log *logger.Logger, hc *health.Monitor) (service.Service, error) {
 	return grpc.NewServer(
 		cfg.GRPC,
 		log,
 		grpc.ServiceName("rpc"),
 		grpc.WithOpenTelemetry(),
-		grpc.RegisterServices(func(server *grpc.Server) {
-			healthServer := health.NewServer()
-			healthServer.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
-			healthpb.RegisterHealthServer(server, healthServer)
-		}),
+		grpc.WithHealth(hc), // grpc.health.v1 follows the monitor
 	)
 }
 ```
@@ -341,6 +340,7 @@ Built-in config blocks from `config.Base` are exposed through these prefixes:
 - `LOGGER_*`
 - `OPS_*`
 - `OTEL_*`
+- `HEALTH_*`
 
 Your own application blocks keep the same pattern. For example, if your config has:
 
@@ -389,6 +389,10 @@ then the derived env names look like:
 | `OPS_EXP_VARS_ENABLED`    | `true`           | Enables the `expvar` endpoint.                                        |
 | `OPS_VERSION_PATH`        | `/version`       | Version endpoint path.                                                |
 | `OPS_VERSION_ENABLED`     | `false`          | Enables the version endpoint.                                         |
+| `OPS_HEALTH_ENABLED`      | `true`           | Enables `/livez`, `/readyz` and `/healthz` (see [Health Checks](#health-checks)). |
+| `OPS_LIVE_PATH`           | `/livez`         | Liveness probe path.                                                  |
+| `OPS_READY_PATH`          | `/readyz`        | Readiness (and startup) probe path.                                   |
+| `OPS_HEALTH_PATH`         | `/healthz`       | Full JSON health report path.                                         |
 | `OPS_READ_TIMEOUT`        | `0`              | HTTP read timeout for the OPS server.                                 |
 | `OPS_WRITE_TIMEOUT`       | `0`              | HTTP write timeout for the OPS server.                                |
 | `OPS_READ_HEADER_TIMEOUT` | `0`              | HTTP read-header timeout for the OPS server.                          |
@@ -402,6 +406,22 @@ then the derived env names look like:
 | `OPS_TLS_CA_CERT_FILE`    | empty            | CA certificate path for client verification.                          |
 | `OPS_TLS_MIN_VERSION`     | `TLS13`          | Minimum TLS version.                                                  |
 | `OPS_TLS_CIPHER_SUITES`   | empty            | Cipher suites for TLS 1.0–1.2; rejected at startup if set together with `OPS_TLS_MIN_VERSION=TLS13`, since Go's TLS 1.3 stack ignores this setting. |
+
+#### `HEALTH_*`
+
+Defaults of the health monitor (`config.Health`). They are starting points, not an SLA: override them per dependency with `health.WithInterval`, `health.WithTimeout`, `health.WithThresholds`.
+
+| Env                          | Default | Meaning                                                                                  |
+|------------------------------|---------|------------------------------------------------------------------------------------------|
+| `HEALTH_INTERVAL`            | `10s`   | Polling period once a check has passed.                                                  |
+| `HEALTH_INITIAL_INTERVAL`    | `1s`    | Polling period until the first success (services start in parallel, first checks often fail). |
+| `HEALTH_TIMEOUT`             | `2s`    | Deadline of one `Check` call (a cold TLS handshake often takes more than 1s).            |
+| `HEALTH_MIN_INTERVAL`        | `1s`    | Minimal distance between runs requested by `Trigger`.                                    |
+| `HEALTH_STALE_AFTER`         | `0`     | A result older than this is stale; `0` means `2*interval + timeout`.                     |
+| `HEALTH_FAILURE_THRESHOLD`   | `1`     | Consecutive failures that turn a passing check into failing.                             |
+| `HEALTH_SUCCESS_THRESHOLD`   | `1`     | Consecutive successes that turn a failing check into passing.                            |
+| `HEALTH_DRAIN_DELAY`         | `0`     | Pause between withdrawing readiness and stopping services on SIGTERM (`5s` in Kubernetes). |
+| `HEALTH_LOG_REPEAT_INTERVAL` | `5m`    | How often a still failing check is reminded in logs.                                     |
 
 #### `OTEL_*` from `config.TracerConfig`
 
@@ -504,6 +524,7 @@ Useful pieces:
 - `service.NewLauncher(...)` for wrapping a start function into a managed service
 - `service.Compose(...)` for grouping services without making the group itself independently runnable
 - `service.WithIgnoreError(...)` for expected shutdown errors
+- `service.WithHealth(...)`, `service.WithDrainDelay(...)` and `service.WithShutdownLast(...)` for health checks and graceful draining, see [Health Checks](#health-checks)
 
 ## HTTP Service
 
@@ -547,10 +568,9 @@ svc, err := grpc.NewServer(
 	log,
 	grpc.ServiceName("rpc"),
 	grpc.WithOpenTelemetry(),
+	grpc.WithHealth(hc), // grpc.health.v1 backed by the health monitor
 	grpc.RegisterServices(func(server *grpc.Server) {
-		healthServer := health.NewServer()
-		healthServer.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
-		healthpb.RegisterHealthServer(server, healthServer)
+		ordersv1.RegisterOrdersServer(server, orders)
 	}),
 )
 ```
@@ -561,6 +581,7 @@ Important behavior:
 - graceful shutdown uses `config.Network.ShutdownTimeout` with a safe fallback
 - `service.NewLauncher` makes the server lifecycle one-shot and terminal after shutdown starts
 - `WithOpenTelemetry()` installs server-side unary and stream interceptors for trace extraction and span continuation
+- `WithHealth(reader)` registers `grpc.health.v1`; see [gRPC health](#grpc-health)
 
 ## OPS Service
 
@@ -581,6 +602,7 @@ By default, it exposes:
 - `/debug/pprof`
 - `/debug/vars`
 - `/version` when `version_enabled=true`
+- `/livez`, `/readyz`, `/healthz` when `health_enabled=true` (default), see [Health Checks](#health-checks)
 
 Each endpoint family can be disabled independently with `metrics_enabled`,
 `profile_enabled`, and `exp_vars_enabled`. Set `enabled: false` to disable the OPS
@@ -616,6 +638,255 @@ opsSvc, err := http.NewOPSServer(cfg.OpsServer, log)
 The OPS metrics registry is process-wide. Duplicate collector registration is returned as an error, so shared packages should register metrics once during startup.
 
 `OPS` metrics and OpenTelemetry metrics are intentionally separate telemetry paths. Applications may use either one or both.
+
+## Health Checks
+
+Package `health` gives every service one non-blocking health model. A single
+`health.Monitor` runs the checks in its own goroutines and keeps the last result
+in an immutable snapshot. HTTP probes, gRPC health, Prometheus metrics and
+subscribers only read that snapshot, so `/readyz` answers in microseconds even
+when a dependency hangs.
+
+```mermaid
+flowchart LR
+  C["Checker<br/>Check(ctx)"] -->|poll + timeout| M[health.Monitor<br/>snapshot]
+  P["StatusHandle<br/>Set(err)"] -->|push| M
+  H["Heartbeat<br/>Beat()"] -->|push| M
+  M --> O["OPS HTTP<br/>/livez /readyz /healthz"]
+  M --> G[gRPC health.v1]
+  M --> PR[Prometheus]
+  M --> S["Subscribe"]
+```
+
+### Wiring
+
+```go
+hc := health.New(cfg.Health, log)
+
+// push status from a driver callback
+kafka, _ := hc.Status("kafka", health.WithImpact(health.Informational))
+consumer.OnStateChange(func(err error) { kafka.Set(err) })
+
+ops, _ := http.NewOPSServer(cfg.OpsServer, log, http.WithHealth(hc))
+rpc, _ := grpc.NewServer(cfg.GRPC, log, grpc.WithHealth(hc))
+
+err := service.Run(log,
+	service.WithHealth(hc),                        // db implements Check -> readiness check "db"
+	service.WithDrainDelay(cfg.Health.DrainDelay), // SIGTERM: readiness off, wait, then stop
+	service.WithShutdownLast(ops),                 // keep answering /readyz 503 until the end
+	service.WithService(db, api, rpc, ops),
+)
+```
+
+`service.WithHealth` starts the monitor with the other services and registers
+every service (also inside `service.Compose`, disabled services are skipped)
+that implements `service.HealthChecker` (`Check(ctx) error`) under its `Name()`
+with `Impact=Readiness`. Implement `health.Configurer` to change the defaults:
+
+```go
+func (s *Cache) HealthOptions() []health.Option {
+	return []health.Option{health.WithImpact(health.Informational)}
+}
+```
+
+Launchers get a check with `service.WithLauncherHealthCheck(fn)`. Other things
+are registered manually before `Run`: `hc.Register(name, checker, opts...)`.
+A duplicate name or an invalid registration makes `Run` fail before any service
+is started.
+
+### Impact
+
+| Impact                | A failure means                          | Use for                                            |
+|-----------------------|------------------------------------------|----------------------------------------------------|
+| `Readiness` (default) | `/readyz` 503, instance leaves balancing | dependencies without which requests cannot be served |
+| `Informational`       | `/healthz` reports `degraded` (still 200) | optional dependencies, caches, async pipelines      |
+| `Liveness`            | `/livez` 503, the pod is restarted       | internal state only: stuck loops, deadlocks (see `Heartbeat`) |
+
+Never put external dependencies into liveness: a database outage would restart
+every replica. Also keep in mind that with the default `Readiness` a shared
+dependency (for example, the database) going down removes **all** replicas from
+balancing at once. That is usually right (they cannot serve anyway, and clients
+get a fast 503 from the load balancer instead of timeouts), but use
+`Informational` for dependencies the service can live without.
+
+### Writing checks
+
+`Check` must respect `ctx`, must not leave goroutines behind, must be cheap and
+must not check other services transitively. The deadline set by the monitor is
+only a safety net: configure timeouts in the dependency client.
+
+```go
+// polled: pgx pool
+hc.Register("postgres", health.CheckerFunc(func(ctx context.Context) error {
+	if err := pool.Ping(ctx); err != nil {
+		return health.PublicError("database unavailable", err) // safe text for HTTP
+	}
+	return nil
+}), health.WithThresholds(2, 1))
+
+// push: Kafka client reports its state, no polling at all
+brokers, _ := hc.Status("kafka", health.WithImpact(health.Informational))
+client.OnConnect(func() { brokers.Set(nil) })
+client.OnDisconnect(func(err error) { brokers.Set(err) })
+
+// re-check right away after a reconnect instead of waiting for the next tick
+db.OnReconnect(func() { hc.Trigger("postgres") })
+
+// heartbeat: liveness of a worker loop
+hb, _ := hc.Heartbeat("consumer-loop", 30*time.Second)
+tick := time.NewTicker(10 * time.Second) // wake up even when there is no work
+for {
+	hb.Beat()
+	select {
+	case <-ctx.Done():
+		return nil
+	case msg := <-messages:
+		handle(msg)
+	case <-tick.C:
+	}
+}
+```
+
+Behavior of the monitor:
+
+- the first run happens right after `Start`, then every `initial_interval` until the first success, then every `interval` (±10% jitter);
+- a run that exceeds `timeout` is recorded as `timeout` immediately; at most one call per check is in flight, ticks during a hung call are skipped;
+- errors, timeouts and panics are failures; `failure_threshold`/`success_threshold` protect from flapping;
+- a result older than `stale_after` (or `WithTTL` for push statuses) is `stale` and counts as failing;
+- `hc.Trigger(name)` runs a check out of schedule (for example, from a reconnect callback); repeated calls are coalesced and limited by `min_interval`;
+- `hc.Subscribe(func(health.Event))` notifies about transitions; always re-read `hc.Snapshot()` in the callback, a slow subscriber may lose old events.
+
+### HTTP endpoints
+
+Semantics follow the Kubernetes API server (`/livez`, `/readyz`, `?verbose`, `?exclude`).
+
+| Endpoint                           | Purpose                        | 200                    | 503                                   |
+|------------------------------------|--------------------------------|------------------------|---------------------------------------|
+| `GET /livez`                       | `livenessProbe`                | live                   | a liveness check fails, monitor stopped |
+| `GET /readyz`                      | `readinessProbe`, `startupProbe` | all readiness checks pass | a check is unknown/failing/stale, draining |
+| `GET /healthz`                     | dashboards, on-call            | `ok`, `degraded`       | `failing`                             |
+| `GET /livez/<check>`, `/readyz/<check>` | manual diagnostics        | the check passes       | otherwise (404 for unknown names)     |
+
+```text
+$ curl -s localhost:8090/readyz?verbose
+[+]postgres ok
+[-]redis failed: timeout
+readyz check failed
+```
+
+- `?exclude=<name>` (repeatable) ignores a check in the aggregate for an emergency bypass; it never overrides draining;
+- `?format=json` for `/livez` and `/readyz`; `/healthz` is always JSON;
+- only `GET` and `HEAD` are allowed, responses carry `Cache-Control: no-store`;
+- error texts are never exposed: responses contain a classification (`timeout`, `panic`, `stale`, `canceled`, `error`) or the message of `health.PublicError`. Full errors go to logs, where `logger` secrets masking applies.
+
+Without `http.WithHealth` the OPS server still answers `/livez` and `/readyz` with 200 while it is up, so services without checks get probes out of the box.
+
+### gRPC health
+
+`grpc.WithHealth(hc)` registers the standard `grpc.health.v1` service:
+
+| Service name                | Follows |
+|-----------------------------|---------|
+| `""`                        | ready   |
+| `readiness`                 | ready   |
+| `liveness`                  | live    |
+| every registered service    | ready   |
+
+`grpc.WithHealthService("pkg.Orders", "postgres", "kafka")` binds a service to
+specific checks. `Watch` clients get updates immediately. When draining starts,
+the health server is shut down and every service becomes `NOT_SERVING`.
+
+### Shutdown and drain
+
+With `service.WithHealth` / `service.WithDrainDelay` the shutdown is phased:
+
+```mermaid
+sequenceDiagram
+  participant K as kubelet / LB
+  participant R as service.Run
+  participant M as Monitor
+  participant S as API / gRPC
+  K->>R: SIGTERM
+  R->>M: Drain()
+  M-->>K: /readyz 503, gRPC NOT_SERVING
+  Note over R,S: drain_delay: servers still accept traffic
+  R->>S: cancel + Stop (shutdown_timeout)
+  R->>M: Stop (last, with WithShutdownLast services)
+```
+
+- the delay is applied only for SIGINT/SIGTERM, not when a service fails;
+- a second signal interrupts the delay;
+- the monitor (and services passed to `WithShutdownLast`, typically the OPS server) stop after all other services, so probes get 503 instead of connection refused;
+- the shutdown budget is `drain_delay + shutdown_timeout`: `terminationGracePeriodSeconds` must be larger (Kubernetes default is 30s);
+- Kubernetes `lifecycle.preStop.sleep` is an alternative that works only in Kubernetes and does not switch `/readyz` or gRPC health. Do not use both, the delays add up (`drain_delay` defaults to `0`).
+
+Without these options `service.Run` behaves exactly as before.
+
+### Kubernetes
+
+```yaml
+spec:
+  terminationGracePeriodSeconds: 45   # > drain_delay (5s) + shutdown_timeout (30s)
+  containers:
+    - name: app
+      env:
+        - { name: HEALTH_DRAIN_DELAY, value: "5s" }
+      ports:
+        - { name: ops, containerPort: 8090 }
+      startupProbe:
+        httpGet: { path: /readyz, port: ops }
+        periodSeconds: 2
+        failureThreshold: 60        # up to 2 minutes for migrations and warm-up
+      readinessProbe:
+        httpGet: { path: /readyz, port: ops }
+        periodSeconds: 5
+        timeoutSeconds: 1
+        failureThreshold: 2
+      livenessProbe:
+        httpGet: { path: /livez, port: ops }
+        periodSeconds: 10
+        timeoutSeconds: 1
+        failureThreshold: 3
+```
+
+- liveness never looks at `/readyz` or `/healthz`;
+- slow start is covered by `startupProbe`, not by a weaker liveness probe;
+- gRPC-only services can use `grpc: { port: 9090, service: readiness }` and `service: liveness`;
+- `timeoutSeconds: 1` is enough: the endpoints never perform I/O;
+- keep the OPS port internal: `/healthz` reveals the list of dependencies.
+
+### Metrics and alerts
+
+With `metrics_enabled` the monitor is registered in the OPS Prometheus registry:
+
+| Metric                                                  | Type      | Labels                                   |
+|---------------------------------------------------------|-----------|------------------------------------------|
+| `go_bones_health_live`, `_ready`, `_draining`           | gauge 0/1 | —                                        |
+| `go_bones_health_check_up`                              | gauge     | `check`, `impact`                        |
+| `go_bones_health_check_stale`                           | gauge     | `check`                                  |
+| `go_bones_health_check_duration_seconds`                | histogram | `check`                                  |
+| `go_bones_health_check_runs_total`                      | counter   | `check`, `result` (success, error, timeout, panic) |
+| `go_bones_health_check_transitions_total`               | counter   | `check`, `to`                            |
+| `go_bones_health_check_last_success_timestamp_seconds`  | gauge     | `check`                                  |
+| `go_bones_health_check_skipped_total`                   | counter   | `check`, `reason` (in_flight, rate_limited) |
+| `go_bones_health_events_dropped_total`                  | counter   | —                                        |
+
+Suggested alerts:
+
+```yaml
+- alert: ServiceNotReady
+  expr: go_bones_health_ready == 0 and go_bones_health_draining == 0
+  for: 5m
+- alert: HealthCheckDown
+  expr: go_bones_health_check_up{impact="readiness"} == 0
+  for: 10m
+- alert: HealthCheckFlapping
+  expr: increase(go_bones_health_check_transitions_total[15m]) > 6
+```
+
+Only transitions are logged (`→ failing` as warn, error for liveness; `→ passing`
+as info with `downtime`), a still failing check is reminded every
+`log_repeat_interval`.
 
 ## OpenTelemetry
 
