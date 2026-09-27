@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/im-kulikov/go-bones/health"
 	"github.com/im-kulikov/go-bones/internal"
 	"github.com/im-kulikov/go-bones/logger"
 )
@@ -19,6 +20,14 @@ type settings struct {
 	logger    *logger.Logger
 	shutdown  time.Duration
 	newSignal func(context.Context, ...os.Signal) (context.Context, context.CancelCauseFunc, handler)
+
+	// health integration, see WithHealth, WithDrainDelay and WithShutdownLast
+	health     *health.Monitor
+	drainDelay time.Duration
+	last       []Service
+	phased     bool
+	notify     func(...os.Signal) (<-chan os.Signal, func())
+	errs       []error
 }
 
 // Service represents a long-running component managed by Run or RunContext.
@@ -105,6 +114,12 @@ func Run(log *logger.Logger, options ...Option) error {
 //   - log: Logger instance used for logging events and errors.
 //   - options: Optional configuration parameters.
 //
+// With WithHealth, WithDrainDelay or WithShutdownLast the shutdown is phased:
+// the health monitor is drained first, then (on SIGINT/SIGTERM) Run waits
+// DrainDelay, then regular services are canceled and stopped, and only then the
+// "last" services (the monitor and anything passed to WithShutdownLast).
+// Health registration errors are returned before any service is started.
+//
 // Returns:
 //   - error: The combined (via errors.Join) non-ignored errors returned by every
 //     managed service's Start method, or nil if none failed. context.CancelCauseFunc
@@ -113,24 +128,39 @@ func Run(log *logger.Logger, options ...Option) error {
 //     their errors are reported, not just whichever one's cancel call won the race.
 func RunContext(top context.Context, log *logger.Logger, options ...Option) error {
 	cfg := newSettings(log, options...)
-	l := cfg.logger
+	cfg.prepareHealth()
+
+	if err := errors.Join(cfg.errs...); err != nil {
+		return err
+	}
 
 	if len(cfg.handle) == 0 {
 		return nil
 	}
 
-	ctx, cancel, handleSignals := cfg.newSignal(top, cfg.signal...)
+	if cfg.phased {
+		return cfg.phasedRun(top)
+	}
 
-	errs := make([]error, len(cfg.handle))
+	return cfg.run(top)
+}
+
+// run is the classic flow: services receive the signal context directly and
+// are stopped concurrently once it is canceled.
+func (g *settings) run(top context.Context) error {
+	l := g.logger
+	ctx, cancel, handleSignals := g.newSignal(top, g.signal...)
+
+	errs := make([]error, len(g.handle))
 
 	var wg sync.WaitGroup
-	for i, service := range cfg.handle {
+	for i, service := range g.handle {
 		wg.Go(func() {
 			defer cancel(nil)
 
 			l.Info("starting service", logger.String("service", service.Name()))
 			err := service.Start(ctx)
-			if err != nil && !containsError(err, cfg.ignore) {
+			if err != nil && !containsError(err, g.ignore) {
 				errs[i] = err
 				cancel(err)
 
@@ -143,7 +173,7 @@ func RunContext(top context.Context, log *logger.Logger, options ...Option) erro
 	}
 
 	wg.Go(handleSignals)
-	defer internal.LazyGracefulShutdown(ctx, cfg.shutdown, func(grace context.Context) {
+	defer internal.LazyGracefulShutdown(ctx, g.shutdown, func(grace context.Context) {
 		if err := context.Cause(ctx); err != nil && errors.Is(err, ErrOsSignal) {
 			l.InfoContext(ctx, err.Error())
 		}
@@ -151,7 +181,7 @@ func RunContext(top context.Context, log *logger.Logger, options ...Option) erro
 		l.InfoContext(grace, "shutting down services")
 
 		var shutdown sync.WaitGroup
-		for _, service := range cfg.handle {
+		for _, service := range g.handle {
 			shutdown.Go(func() {
 				l.InfoContext(grace, "shutting down service",
 					logger.String("service", service.Name()))
@@ -175,6 +205,7 @@ func newSettings(log *logger.Logger, options ...Option) settings {
 		signal:    defaultSignals,
 		ignore:    errors.Join(defaultIgnoredErrors...),
 		newSignal: signalContextRoutine,
+		notify:    notifySignals,
 	}
 	for _, option := range options {
 		option(&cfg)

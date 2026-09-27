@@ -45,6 +45,7 @@ type launcher struct {
 	started chan struct{}
 	logs    *logger.Logger
 	hook    []func(context.Context)
+	check   func(context.Context) error
 
 	init atomic.Bool
 	halt atomic.Bool
@@ -99,14 +100,22 @@ func (l *launcher) apply(options ...LauncherOption) *launcher {
 //   - Stop cancels the callback context and waits for completion, up to ctx's
 //     deadline; it never runs shutdown hooks itself.
 //   - Further Start calls fail once the instance has already started or begun stopping.
+//
+// With WithLauncherHealthCheck the returned service also implements HealthChecker.
 func NewLauncher(name string, call Launcher, options ...LauncherOption) Service {
-	return (&launcher{
+	l := (&launcher{
 		name:    name,
 		call:    call,
 		logs:    logger.Default(),
 		done:    make(chan struct{}),
 		started: make(chan struct{}),
 	}).apply(options...)
+
+	if l.check != nil {
+		return checkedLauncher{l}
+	}
+
+	return l
 }
 
 // Name returns the service name used in orchestration and lifecycle logs.
