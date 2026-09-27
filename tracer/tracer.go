@@ -3,6 +3,7 @@ package tracer
 import (
 	"context"
 	"errors"
+	"net"
 	"os"
 	"strings"
 	"time"
@@ -116,6 +117,41 @@ func enabled(cfg config.TracerConfig) bool {
 		hasStandardBootstrapConfiguration()
 }
 
+// warnIfInsecureWithRemoteEndpoint logs a warning when cfg.Insecure=true (the
+// package default, meant for local development) would actually be applied to
+// a non-local OTLP endpoint, sending telemetry over an unencrypted connection.
+// It stays silent when a signal-specific or global OTEL_EXPORTER_OTLP_INSECURE
+// env var is set, since that env value - not cfg.Insecure - wins in that case.
+func warnIfInsecureWithRemoteEndpoint(l *logger.Logger, cfg config.TracerConfig) {
+	if !cfg.Insecure || cfg.Endpoint == "" || isLocalEndpoint(cfg.Endpoint) {
+		return
+	}
+
+	for _, signal := range [...]string{"traces", "metrics", "logs"} {
+		if shouldApplyInsecureFallback(signal) {
+			l.Warn("OTLP insecure fallback is enabled for a non-local endpoint; "+
+				"telemetry will be sent without TLS",
+				logger.String("endpoint", cfg.Endpoint))
+
+			return
+		}
+	}
+}
+
+func isLocalEndpoint(endpoint string) bool {
+	host := endpoint
+	if h, _, err := net.SplitHostPort(endpoint); err == nil {
+		host = h
+	}
+
+	switch host {
+	case "localhost", "127.0.0.1", "::1", "":
+		return true
+	default:
+		return false
+	}
+}
+
 // Init creates a lifecycle service that bootstraps process-wide OpenTelemetry state.
 //
 // The package follows an env-first approach:
@@ -133,6 +169,8 @@ func Init(log *logger.Logger, cfg config.TracerConfig) service.Service {
 
 		return nil
 	}
+
+	warnIfInsecureWithRemoteEndpoint(l, cfg)
 
 	return service.NewLauncher(tracerServiceName,
 		func(ctx context.Context) error {
@@ -168,35 +206,35 @@ func bootstrapProviders(ctx context.Context, cfg config.TracerConfig) (hooks, er
 
 	out := make(hooks, 0, 3)
 
-	traceProvider, err := newTraceProviderFunc(ctx, res, cfg)
+	tProvider, err := newTraceProviderFunc(ctx, res, cfg)
 	if err != nil {
 		return nil, err
 	}
-	otel.SetTracerProvider(traceProvider)
-	out = append(out, traceProvider.Shutdown)
+	otel.SetTracerProvider(tProvider)
+	out = append(out, tProvider.Shutdown)
 
 	if cfg.SendMetrics {
-		meterProvider, errMeter := newMeterProviderFunc(ctx, res, cfg)
+		mProvider, errMeter := newMeterProviderFunc(ctx, res, cfg)
 		if errMeter != nil {
-			return nil, errMeter
+			return nil, errors.Join(errMeter, out.run(ctx))
 		}
 
 		// OTEL metrics export is opt-in and intentionally independent of the
 		// OPS Prometheus endpoint, so applications can decide which telemetry path
 		// to expose and operate.
-		otel.SetMeterProvider(meterProvider)
-		out = append(out, meterProvider.Shutdown)
+		otel.SetMeterProvider(mProvider)
+		out = append(out, mProvider.Shutdown)
 	}
 
 	if cfg.SendLogs {
-		loggerProvider, errLogger := newLoggerProviderFunc(ctx, res, cfg)
+		lProvider, errLogger := newLoggerProviderFunc(ctx, res, cfg)
 		if errLogger != nil {
-			return nil, errLogger
+			return nil, errors.Join(errLogger, out.run(ctx))
 		}
 
-		logglobal.SetLoggerProvider(loggerProvider)
+		logglobal.SetLoggerProvider(lProvider)
 		logger.SetOpenTelemetryBridge(true)
-		out = append(out, loggerProvider.Shutdown)
+		out = append(out, lProvider.Shutdown)
 		out = append(out, func(context.Context) error {
 			logger.SetOpenTelemetryBridge(false)
 			return nil

@@ -27,6 +27,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	tracenoop "go.opentelemetry.io/otel/trace/noop"
 	collogpb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
+	colmetricpb "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
 	coltracepb "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	logspb "go.opentelemetry.io/proto/otlp/logs/v1"
@@ -189,6 +190,45 @@ func TestInitWithNilLogger(t *testing.T) {
 	require.Equal(t, tracerServiceName, svc.Name())
 }
 
+func TestInit_InsecureRemoteEndpointWarning(t *testing.T) {
+	cases := []struct {
+		name     string
+		endpoint string
+		setEnv   bool
+		wantWarn bool
+	}{
+		{name: "warns on insecure remote endpoint", endpoint: "collector.example.com:4317", wantWarn: true},
+		{name: "no warning for local endpoint", endpoint: "localhost:4317", wantWarn: false},
+		{name: "no warning when env overrides the fallback", endpoint: "collector.example.com:4317", setEnv: true, wantWarn: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.setEnv {
+				t.Setenv(envOTELExporterOTLPInsecure, "false")
+			}
+
+			buf := logger.NewSyncBuffer()
+			log := logger.ForTests(
+				logger.TestLoggerWriter(buf),
+				logger.TestLoggerWriteToTB(t))
+
+			Init(log, config.TracerConfig{
+				Enabled:  true,
+				Insecure: true,
+				Endpoint: tc.endpoint,
+			})
+
+			if tc.wantWarn {
+				require.Contains(t, buf.String(), "insecure")
+				require.Contains(t, buf.String(), tc.endpoint)
+			} else {
+				require.NotContains(t, buf.String(), "insecure")
+			}
+		})
+	}
+}
+
 func TestFallbackResourceAttributes(t *testing.T) {
 	t.Run("uses config app metadata as fallback", func(t *testing.T) {
 		var cfg config.TracerConfig
@@ -317,6 +357,31 @@ func TestLifecycleStartStop(t *testing.T) {
 	svc.Stop(context.Background())
 }
 
+func TestInitLogsShutdownError(t *testing.T) {
+	t.Cleanup(overrideProviderFactories())
+
+	expected := fmt.Errorf("shutdown failed")
+	newTraceProviderFunc = func(context.Context, *resource.Resource, config.TracerConfig) (traceProvider, error) {
+		return fakeTraceProvider{err: expected}, nil
+	}
+
+	buf := logger.NewSyncBuffer()
+	svc := Init(logger.ForTests(logger.TestLoggerWriter(buf)), config.TracerConfig{Enabled: true})
+
+	ctx, cancel := context.WithCancelCause(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- svc.Start(ctx) }()
+
+	require.Eventually(t, func() bool {
+		return bytes.Contains(buf.Bytes(), []byte("tracing initialized"))
+	}, time.Second, 10*time.Millisecond)
+
+	cancel(context.Canceled)
+	require.ErrorIs(t, <-done, context.Canceled)
+	require.Contains(t, buf.String(), "could not shutdown")
+	require.Contains(t, buf.String(), expected.Error())
+}
+
 func TestBootstrapRunDisabledReturnsNil(t *testing.T) {
 	require.Empty(t, Init(
 		logger.ForTests(logger.TestLoggerWriteToTB(t)),
@@ -413,8 +478,9 @@ func TestBootstrapProvidersReturnsProviderErrors(t *testing.T) {
 		t.Cleanup(overrideProviderFactories())
 		expected := fmt.Errorf("meter provider")
 
+		var traceShutdowns atomic.Int32
 		newTraceProviderFunc = func(context.Context, *resource.Resource, config.TracerConfig) (traceProvider, error) {
-			return fakeTraceProvider{}, nil
+			return fakeTraceProvider{shutdowns: &traceShutdowns}, nil
 		}
 		newMeterProviderFunc = func(context.Context, *resource.Resource, config.TracerConfig) (meterProvider, error) {
 			return nil, expected
@@ -425,14 +491,16 @@ func TestBootstrapProvidersReturnsProviderErrors(t *testing.T) {
 			config.TracerConfig{Enabled: true, SendMetrics: true},
 		)
 		require.ErrorIs(t, err, expected)
+		require.Equal(t, int32(1), traceShutdowns.Load())
 	})
 
 	t.Run("logger provider error is returned", func(t *testing.T) {
 		t.Cleanup(overrideProviderFactories())
 		expected := fmt.Errorf("logger provider")
 
+		var traceShutdowns atomic.Int32
 		newTraceProviderFunc = func(context.Context, *resource.Resource, config.TracerConfig) (traceProvider, error) {
-			return fakeTraceProvider{}, nil
+			return fakeTraceProvider{shutdowns: &traceShutdowns}, nil
 		}
 		newLoggerProviderFunc = func(context.Context, *resource.Resource, config.TracerConfig) (loggerProvider, error) {
 			return nil, expected
@@ -443,6 +511,7 @@ func TestBootstrapProvidersReturnsProviderErrors(t *testing.T) {
 			config.TracerConfig{Enabled: true, SendLogs: true},
 		)
 		require.ErrorIs(t, err, expected)
+		require.Equal(t, int32(1), traceShutdowns.Load())
 	})
 }
 
@@ -642,11 +711,15 @@ func overrideProviderFactories() func() {
 type fakeTraceProvider struct {
 	tracenoop.TracerProvider
 	shutdowns *atomic.Int32
+	err       error
 }
 
 func (f fakeTraceProvider) Shutdown(context.Context) error {
-	f.shutdowns.Add(1)
-	return nil
+	if f.shutdowns != nil {
+		f.shutdowns.Add(1)
+	}
+
+	return f.err
 }
 
 type fakeMeterProvider struct {
@@ -673,9 +746,10 @@ type fakeOTLPCollector struct {
 	mu     sync.Mutex
 	server *httptest.Server
 
-	logs   []*collogpb.ExportLogsServiceRequest
-	traces []*coltracepb.ExportTraceServiceRequest
-	errs   []error
+	logs    []*collogpb.ExportLogsServiceRequest
+	metrics []*colmetricpb.ExportMetricsServiceRequest
+	traces  []*coltracepb.ExportTraceServiceRequest
+	errs    []error
 }
 
 type testApp struct {
@@ -724,7 +798,7 @@ func newTestApp(t *testing.T, top context.Context) *testApp {
 	cfg.Enabled = true
 	cfg.UseHTTP = true
 	cfg.SendLogs = true
-	cfg.SendMetrics = true // should see an error for metrics
+	cfg.SendMetrics = true
 	cfg.SetAppNameAndVersion("payments-api", "1.2.3")
 
 	buf := logger.NewSyncBuffer()
@@ -780,6 +854,7 @@ func (c *fakeOTLPCollector) configureEnv(t *testing.T) {
 
 	t.Setenv(envOTELExporterOTLPTracesEndpoint, c.url("/v1/traces"))
 	t.Setenv(envOTELExporterOTLPLogsEndpoint, c.url("/v1/logs"))
+	t.Setenv(envOTELExporterOTLPMetricsEndpoint, c.url("/v1/metrics"))
 }
 
 func (c *fakeOTLPCollector) waitForExport(t *testing.T) {
@@ -787,11 +862,11 @@ func (c *fakeOTLPCollector) waitForExport(t *testing.T) {
 
 	require.Eventuallyf(t,
 		func() bool {
-			return c.traceCount() > 0 && c.logCount() > 0
+			return c.traceCount() > 0 && c.logCount() > 0 && c.metricCount() > 0
 		},
 		time.Second, 10*time.Millisecond,
-		"traceCount = %d && logCount = %d",
-		c.traceCount(), c.logCount())
+		"traceCount = %d && logCount = %d && metricCount = %d",
+		c.traceCount(), c.logCount(), c.metricCount())
 }
 
 func (c *fakeOTLPCollector) handle(w http.ResponseWriter, r *http.Request) {
@@ -805,6 +880,28 @@ func (c *fakeOTLPCollector) handle(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = r.Body.Close() }()
 
 	switch r.URL.Path {
+	case "/v1/metrics":
+		req := new(colmetricpb.ExportMetricsServiceRequest)
+		if err = proto.Unmarshal(body, req); err != nil {
+			c.addError(fmt.Errorf("unmarshal OTLP metrics request: %w", err))
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		c.mu.Lock()
+		c.metrics = append(c.metrics, req)
+		c.mu.Unlock()
+
+		payload, marshalErr := proto.Marshal(new(colmetricpb.ExportMetricsServiceResponse))
+		if marshalErr != nil {
+			c.addError(fmt.Errorf("marshal OTLP metrics response: %w", marshalErr))
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/x-protobuf")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(payload)
 	case "/v1/logs":
 		req := new(collogpb.ExportLogsServiceRequest)
 		if err = proto.Unmarshal(body, req); err != nil {
@@ -881,6 +978,13 @@ func (c *fakeOTLPCollector) logCount() int {
 	defer c.mu.Unlock()
 
 	return len(c.logs)
+}
+
+func (c *fakeOTLPCollector) metricCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return len(c.metrics)
 }
 
 func (c *fakeOTLPCollector) firstTraceRequest() *coltracepb.ExportTraceServiceRequest {
