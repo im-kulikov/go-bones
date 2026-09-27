@@ -38,6 +38,8 @@ type serverOptions struct {
 	log  *logger.Logger
 	opts []ServerOption
 	init []func(*Server)
+
+	health *healthSync
 }
 
 type (
@@ -169,6 +171,9 @@ func prepareServer(
 		}
 	}
 
+	// after user callbacks, so every registered service gets a health status
+	options.health.register(options.grpc)
+
 	return options, nil
 }
 
@@ -187,6 +192,10 @@ func (h *serverOptions) listen(top context.Context) error {
 	h.log.InfoContext(top, grpcServerStarting,
 		logger.String("service", h.name),
 		logger.String("address", h.address()))
+
+	// Health statuses follow the monitor while the server runs. Deferred first,
+	// so it is released only after the graceful shutdown below has finished.
+	defer h.health.start()()
 
 	// Sequencing below is easy to break by reordering these two defers or
 	// inserting a new one between them:

@@ -17,17 +17,34 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/health"
-	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/im-kulikov/go-bones/config"
+	bonehealth "github.com/im-kulikov/go-bones/health"
 	"github.com/im-kulikov/go-bones/internal/testutil"
 	"github.com/im-kulikov/go-bones/logger"
 	"github.com/im-kulikov/go-bones/service"
 )
+
+// startedMonitor runs a health monitor without checks: it is ready right after
+// Start, so the gRPC health service reports SERVING.
+func startedMonitor(t *testing.T, ctx context.Context) *bonehealth.Monitor {
+	t.Helper()
+
+	hc := bonehealth.New(config.Health{}, logger.ForTests())
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		assert.NoError(t, hc.Start(ctx))
+	}()
+
+	t.Cleanup(func() { <-done })
+
+	return hc
+}
 
 type otelSleepServer struct{ log *logger.Logger }
 
@@ -52,12 +69,10 @@ func Test_GRPCServer_ServesRequests(t *testing.T) {
 	srv, err := NewServer(cfg, log,
 		RegisterServices(
 			func(server *Server) {
-				healthServer := health.NewServer()
-				healthServer.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
-				healthpb.RegisterHealthServer(server, healthServer)
 				server.RegisterService(&sleepServiceDesc, sleep)
 			},
-		))
+		),
+		WithHealth(startedMonitor(t, ctx)))
 	require.NoError(t, err)
 
 	runDone := make(chan error, 1)
@@ -102,13 +117,7 @@ func Test_GRPCServer_With_TLS(t *testing.T) {
 	cfg.TLSConfig.Enabled = true
 	cfg.TLSConfig.KeyFile, cfg.TLSConfig.CertFile = generateTLSKeyPair(t)
 
-	srv, err := NewServer(cfg, log, RegisterServices(
-		func(server *Server) {
-			healthServer := health.NewServer()
-			healthServer.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
-			healthpb.RegisterHealthServer(server, healthServer)
-		},
-	))
+	srv, err := NewServer(cfg, log, WithHealth(startedMonitor(t, ctx)))
 	require.NoError(t, err)
 
 	runDone := make(chan error, 1)
