@@ -230,8 +230,11 @@ func (g *settings) startService(
 ) error {
 	g.logger.Info("starting service", logger.String("service", svc.Name()))
 
+	started := time.Now()
 	err := svc.Start(ctx)
 	if err == nil || containsError(err, g.ignore) {
+		g.logStopped(svc, started)
+
 		return nil
 	}
 

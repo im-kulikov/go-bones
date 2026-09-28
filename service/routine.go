@@ -159,8 +159,11 @@ func (g *settings) run(top context.Context) error {
 			defer cancel(nil)
 
 			l.Info("starting service", logger.String("service", service.Name()))
+			started := time.Now()
 			err := service.Start(ctx)
-			if err != nil && !containsError(err, g.ignore) {
+			if err == nil || containsError(err, g.ignore) {
+				g.logStopped(service, started)
+			} else {
 				errs[i] = err
 				cancel(err)
 
@@ -197,6 +200,14 @@ func (g *settings) run(top context.Context) error {
 	cancel(context.Canceled)
 
 	return g.result(top, errs)
+}
+
+// logStopped reports a service that returned from Start without a failure,
+// so every "starting service" line has a matching end.
+func (g *settings) logStopped(svc Service, started time.Time) {
+	g.logger.Info("service stopped",
+		logger.String("service", svc.Name()),
+		logger.Duration("uptime", time.Since(started)))
 }
 
 // result joins the service errors with the cancellation cause of top, unless
