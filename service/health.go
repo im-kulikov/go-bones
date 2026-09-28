@@ -78,10 +78,15 @@ func WithShutdownLast(v ...Service) Option {
 }
 
 // WithLauncherHealthCheck makes the launcher implement HealthChecker, so it is
-// auto-registered by WithHealth. NewLauncher returns an unexported type, which
-// is why the check is passed as an option.
-func WithLauncherHealthCheck(fn func(context.Context) error) LauncherOption {
-	return func(l *launcher) { l.check = fn }
+// auto-registered by WithHealth under the launcher name. NewLauncher returns an
+// unexported type, which is why the check is passed as an option. opts
+// configure the registration, e.g. health.WithImpact(health.Informational);
+// the default is a Readiness check with the monitor's intervals.
+func WithLauncherHealthCheck(fn func(context.Context) error, opts ...health.Option) LauncherOption {
+	return func(l *launcher) {
+		l.check = fn
+		l.checkOpts = opts
+	}
 }
 
 // checkedLauncher is a launcher with a health check.
@@ -89,6 +94,10 @@ type checkedLauncher struct{ *launcher }
 
 // Check implements HealthChecker.
 func (l checkedLauncher) Check(ctx context.Context) error { return l.check(ctx) }
+
+// HealthOptions implements health.Configurer with the options passed to
+// WithLauncherHealthCheck.
+func (l checkedLauncher) HealthOptions() []health.Option { return l.checkOpts }
 
 // sameService compares services without panicking on non-comparable types.
 func sameService(a, b Service) bool {
