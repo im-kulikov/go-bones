@@ -9,7 +9,7 @@ package config
 //
 // nolint:lll
 type Ops struct {
-	Network `yaml:",inline" env:",squash"`
+	Network
 
 	Address string `yaml:"address" env:"ADDRESS" toml:"address" json:"address" default:":8090"`
 	Enabled bool   `yaml:"enabled" env:"ENABLED" toml:"enabled" json:"enabled" default:"true"`

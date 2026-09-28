@@ -10,7 +10,7 @@ package config
 //
 // nolint:lll
 type HTTP struct {
-	Network `yaml:",inline" env:",squash" toml:",inline" json:",inline"`
+	Network
 
 	Address string `yaml:"address" env:"ADDRESS" toml:"address" json:"address" default:":8080"`
 }
@@ -23,7 +23,7 @@ func (c HTTP) Addr() string { return c.Address }
 //
 // nolint:lll
 type GRPC struct {
-	Network `yaml:",inline" env:",squash" toml:",inline" json:",inline"`
+	Network
 
 	Address string `yaml:"address" env:"ADDRESS" toml:"address" json:"address" default:":9090"`
 }

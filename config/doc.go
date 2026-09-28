@@ -6,8 +6,8 @@
 // Example:
 //
 //	type appConfig struct {
-//		Base `env:",squash" yaml:",inline" json:",inline" toml:",inline"`
-//		DefaultConfigFlag `env:",squash" yaml:",inline" json:",inline" toml:",inline"`
+//		Base
+//		DefaultConfigFlag
 //
 //		HTTP struct {
 //			Address string `env:"ADDRESS" yaml:"address" default:":8080"`
