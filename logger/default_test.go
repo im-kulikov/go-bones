@@ -34,6 +34,7 @@ func Test_default(t *testing.T) {
 
 	require.NotEmpty(t, Default())
 
+	cfg.Format = "text" // the expected output is in the text format
 	cfg.AddAppInfo = true
 	cfg.Secrets = append(cfg.Secrets, slog.TimeKey)
 	cfg.SetAppNameAndVersion("test-app-name", "test-app-version")
@@ -55,6 +56,7 @@ func Test_default(t *testing.T) {
 
 func Test_defaultWithDefaultLevel(t *testing.T) {
 	var cfg config.Logger
+	cfg.Format = "text" // the expected output is in the text format
 	cfg.AddAppInfo = true
 	cfg.Secrets = append(cfg.Secrets, slog.TimeKey)
 	cfg.SetAppNameAndVersion("test-app-name", "test-app-version")
@@ -84,6 +86,7 @@ func Test_defaultWithDefaultLevel(t *testing.T) {
 
 func Test_WithHandler(t *testing.T) {
 	var cfg config.Logger
+	cfg.Format = "text" // the expected output is in the text format
 	cfg.AddAppInfo = true
 	cfg.Secrets = append(cfg.Secrets, slog.TimeKey)
 	cfg.SetAppNameAndVersion("test-app-name", "test-app-version")

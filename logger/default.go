@@ -71,20 +71,21 @@ func optionsFromConfig(cfg config.Logger, opts []Option) iter.Seq[Option] {
 	}
 }
 
-// formatFor returns the handler constructor for logger.format; an unknown
-// format falls back to text with a warning.
+// formatFor returns the handler constructor for logger.format. JSON is the
+// default, as expected in production; an unknown format falls back to it with
+// a warning.
 func formatFor(name string) HandlerConstructor {
 	switch name {
-	case "json":
-		return func(w io.Writer, o *HandlerOptions) Handler { return slog.NewJSONHandler(w, o) }
+	case "text":
+		return func(w io.Writer, o *HandlerOptions) Handler { return slog.NewTextHandler(w, o) }
 	case "console":
 		return NewConsoleHandler
-	case "text":
+	case "", "json":
 	default:
 		Warn("could not parse logger.format", String("format", name))
 	}
 
-	return func(w io.Writer, o *HandlerOptions) Handler { return slog.NewTextHandler(w, o) }
+	return func(w io.Writer, o *HandlerOptions) Handler { return slog.NewJSONHandler(w, o) }
 }
 
 // Init rebuilds the process-wide default logger from config and stores it globally.

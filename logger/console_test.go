@@ -99,3 +99,20 @@ func TestInit_ConsoleFormat(t *testing.T) {
 
 	require.Regexp(t, `^\d\d:\d\d:\d\d\.\d{3} INF started version=dev\n$`, buf.String())
 }
+
+func TestFormatFor(t *testing.T) {
+	buf := new(bytes.Buffer)
+	record := slog.NewRecord(time.Time{}, slog.LevelInfo, "hello", 0)
+
+	for format, want := range map[string]string{
+		"":        `{"level":"INFO","msg":"hello"}` + "\n",
+		"json":    `{"level":"INFO","msg":"hello"}` + "\n",
+		"text":    "level=INFO msg=hello\n",
+		"console": "INF hello\n",
+	} {
+		t.Setenv("NO_COLOR", "1")
+		buf.Reset()
+		require.NoError(t, formatFor(format)(buf, nil).Handle(t.Context(), record), format)
+		require.Equal(t, want, buf.String(), format)
+	}
+}
