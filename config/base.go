@@ -10,8 +10,12 @@ import (
 )
 
 // Base provides the standard configuration structure for go-bones applications.
-// It groups logger, operations server, and tracer configuration under a single root.
+// It groups logger, operations server, and tracer configuration under a single root,
+// and gives the command line --config / -c (the config file) and --print-config.
 type Base struct {
+	DefaultConfigFlag // --config, -c
+	PrintConfigFlag   // --print-config[=yaml|json|toml|env]
+
 	Logger    Logger       `env:"LOGGER" yaml:"logger" json:"logger" toml:"logger"`
 	OpsServer Ops          `env:"OPS"    yaml:"ops"    json:"ops"    toml:"ops"`
 	Tracer    TracerConfig `env:"OTEL"   yaml:"tracer" json:"tracer" toml:"tracer"`

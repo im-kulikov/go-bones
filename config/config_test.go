@@ -13,8 +13,6 @@ import (
 
 type TestConfig struct {
 	Base
-
-	Config string `flag:"config,config:true"`
 }
 
 type testCase struct {
