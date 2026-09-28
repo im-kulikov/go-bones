@@ -78,8 +78,43 @@ func WithTOML() Option {
 func (c *settings) setDefaults() {
 	if info, ok := debug.ReadBuildInfo(); ok {
 		c.name = info.Main.Path
-		c.version = info.Main.Version
+		c.version = buildVersion(info)
 	}
+}
+
+// buildVersion returns the main module version or, for a build from a working
+// tree ("(devel)"), the VCS revision stamped by go build: its first 12
+// characters, with "-dirty" when the tree had local changes. This makes
+// WithVersion and -ldflags unnecessary for most builds.
+func buildVersion(info *debug.BuildInfo) string {
+	if v := info.Main.Version; v != "" && v != "(devel)" {
+		return v
+	}
+
+	var (
+		revision string
+		dirty    bool
+	)
+
+	for _, s := range info.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			revision = s.Value
+		case "vcs.modified":
+			dirty = s.Value == "true"
+		}
+	}
+
+	if revision == "" {
+		return info.Main.Version
+	}
+
+	revision = revision[:min(12, len(revision))]
+	if dirty {
+		revision += "-dirty"
+	}
+
+	return revision
 }
 
 // Load fills v from configuration sources configured through Option values.
