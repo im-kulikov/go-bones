@@ -27,6 +27,10 @@ type appSetter interface {
 	SetAppNameAndVersion(name, version string)
 }
 
+// Bones returns the go-bones part of an application config. It is promoted to
+// any struct embedding Base, which lets app.Init find it without reflection.
+func (b *Base) Bones() *Base { return b }
+
 // Network defines the foundational configuration for network-based services,
 // including timeouts and TLS settings.
 //

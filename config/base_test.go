@@ -48,3 +48,9 @@ func Test_setAppSettings_UsesSupportedShapesOnly(t *testing.T) {
 		"pointer fields are intentionally ignored by setAppSettings",
 	)
 }
+
+func TestBase_BonesIsPromoted(t *testing.T) {
+	var app struct{ Base }
+
+	require.Same(t, &app.Base, app.Bones())
+}
