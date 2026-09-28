@@ -91,13 +91,11 @@ func TestServer_GracefulShutdown_WithInMemoryTransport(t *testing.T) {
 			cfg,
 			logger.ForTests(logger.TestLoggerWriteToTB(t)),
 			func(options *serverOptions) { options.open = pipeListenerOpener{listener} },
-			ServerOptions(func(server *Server) {
-				server.Handler = HandlerFunc(func(w ResponseWriter, _ *Request) {
-					close(requestStarted)
-					<-releaseRequest
-					w.WriteHeader(StatusNoContent)
-				})
-			}),
+			WithHandler(HandlerFunc(func(w ResponseWriter, _ *Request) {
+				close(requestStarted)
+				<-releaseRequest
+				w.WriteHeader(StatusNoContent)
+			})),
 		)
 		require.NoError(t, err)
 

@@ -57,6 +57,11 @@ func ServiceName(name string) Option {
 	return func(settings *serverOptions) { settings.name = name }
 }
 
+// WithHandler sets the handler of the server, usually a ServeMux or a router.
+func WithHandler(h Handler) Option {
+	return ServerOptions(func(s *Server) { s.Handler = h })
+}
+
 // ServerOptions applies raw http.Server mutators to the constructed server.
 func ServerOptions(opts ...ServerOption) Option {
 	return func(s *serverOptions) {
