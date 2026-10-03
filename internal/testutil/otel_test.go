@@ -8,7 +8,6 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	otellog "go.opentelemetry.io/otel/log"
-	otellogglobal "go.opentelemetry.io/otel/log/global"
 	otellognoop "go.opentelemetry.io/otel/log/noop"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
@@ -22,7 +21,7 @@ func TestInstallOTelRecorder(t *testing.T) {
 
 	otel.SetTracerProvider(prevTraceProvider)
 	otel.SetTextMapPropagator(prevPropagator)
-	otellogglobal.SetLoggerProvider(prevLogProvider)
+	otel.SetLoggerProvider(prevLogProvider)
 
 	var recorder *OTelRecorder
 	var spanCtx trace.SpanContext
@@ -44,7 +43,7 @@ func TestInstallOTelRecorder(t *testing.T) {
 
 		record := new(otellog.Record)
 		record.SetBody(attribute.StringValue("demo-log"))
-		otellogglobal.GetLoggerProvider().Logger("testutil/otel").Emit(ctx, *record)
+		otel.GetLoggerProvider().Logger("testutil/otel").Emit(ctx, *record)
 
 		gotSpan, ok := recorder.FindSpan("demo-span")
 		require.True(t, ok)
@@ -59,7 +58,7 @@ func TestInstallOTelRecorder(t *testing.T) {
 	})
 
 	require.Equal(t, prevTraceProvider, otel.GetTracerProvider())
-	require.Equal(t, prevLogProvider, otellogglobal.GetLoggerProvider())
+	require.Equal(t, prevLogProvider, otel.GetLoggerProvider())
 	require.Equal(t, prevPropagator, otel.GetTextMapPropagator())
 }
 

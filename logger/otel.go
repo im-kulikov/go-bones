@@ -9,9 +9,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	otellog "go.opentelemetry.io/otel/log"
-	logglobal "go.opentelemetry.io/otel/log/global"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -37,7 +37,7 @@ func SetOpenTelemetryBridge(enabled bool) {
 }
 
 func openTelemetryLogger() otellog.Logger {
-	return logglobal.Logger(openTelemetryLoggerName)
+	return otel.Logger(openTelemetryLoggerName)
 }
 
 func openTelemetryBridgeEnabled() bool {
