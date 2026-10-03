@@ -31,6 +31,9 @@ every readiness check up; `Overall` adds `degraded` for informational failures.
 - Readers never do I/O or wait for a checker: `Snapshot`, HTTP/gRPC adapters
   and `Collect` read the published state only.
 - Registration after `Start` → `ErrMonitorStarted`; names are unique.
+- `Start` after `Stop` returns `ErrMonitorStopped`, or `ctx.Err()` when its
+  context is already done: on shutdown the runner may stop the monitor before
+  its `Start` goroutine ran, and that must not fail the application.
 - At most one `Check` call per registration is in flight; a timeout is
   recorded at the deadline without waiting for the checker; a panic becomes
   `ErrPanic`; cancellations during shutdown are not recorded.

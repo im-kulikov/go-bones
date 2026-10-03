@@ -17,7 +17,8 @@ const (
 	// ServiceName is the name returned by Monitor.Name.
 	ServiceName = "health"
 
-	// ErrMonitorStopped is returned by Start after Stop.
+	// ErrMonitorStopped is returned by Start after Stop, unless the context of
+	// Start is already done: then it returns the context error.
 	ErrMonitorStopped bones.Error = "health monitor stopped"
 
 	jitterPercent = 10
@@ -209,6 +210,12 @@ func (m *Monitor) Start(top context.Context) error {
 	m.mu.Lock()
 	if m.stopped {
 		m.mu.Unlock()
+
+		// Stop won the race: on shutdown the runner cancels ctx before it stops
+		// the monitor, so there is nothing to run and nothing has failed.
+		if err := top.Err(); err != nil {
+			return err
+		}
 
 		return ErrMonitorStopped
 	}
