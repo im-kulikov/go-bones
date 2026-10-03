@@ -61,7 +61,9 @@ User view: [Lifecycle](../lifecycle.md), [Getting started](../getting-started.md
   disabled component and is not stored; a typed nil (`(*T)(nil)`) is an error
   wrapping `ErrNilComponent` (`typedNil`).
 - `NewTicker` runs immediately, never overlaps runs, logs task errors and keeps
-  going, panics on a non-positive interval.
+  going, panics on a non-positive interval. `WithTickerJitter` clamps to
+  [0, 1] and turns NaN into 0: a NaN jitter makes every interval negative and
+  spins the timer.
 - `WithLauncherHealthCheck` returns `checkedLauncher`, which implements
   `HealthChecker` and `health.Configurer`.
 

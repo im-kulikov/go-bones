@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"math"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -85,6 +86,11 @@ func TestTicker_Options(t *testing.T) {
 
 	WithTickerJitter(5)(tk)
 	require.InDelta(t, 1.0, tk.jitter, 0)
+
+	// NaN would make every interval negative and spin the timer.
+	WithTickerJitter(math.NaN())(tk)
+	require.Zero(t, tk.jitter)
+	require.Equal(t, time.Minute, tk.next(), "NaN is no jitter")
 
 	WithTickerJitter(0.1)(tk)
 	for range 100 {
