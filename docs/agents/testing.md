@@ -13,8 +13,10 @@ built on go-bones see the user guide [Testing](../testing.md).
 | coverage of a package | `go test -coverprofile=/tmp/c.out ./health/ && go tool cover -func=/tmp/c.out \| tail -1` |
 | vet / lint | `make vet`, `make lint` |
 
-CI runs `go test ./...` without `-race`, plus golangci-lint. Coverage: aim for
-100% per package. The maintainer keeps it in his commits; it is not required
+CI (`.github/workflows/go.yml`) runs `go mod tidy -diff` and `go test -race
+./...` on the two latest Go releases (`oldstable`, `stable`); golangci-lint
+v2.14 and the Codecov upload run on `stable`. Coverage: aim for 100% per
+package. The maintainer keeps it in his commits; it is not required
 from contributors, and tooling enforces only 70%. Check your package with the
 command above. Tests must pass with `-race`.
 

@@ -35,7 +35,7 @@ routing table below — usually one package page. Go further (user guides in
 | Goal | Command |
 |---|---|
 | test a package | `go test -race -count=1 ./health/...` |
-| all tests | `make test` — always `./...` with `-race` and a 70% gate; CI runs plain `go test ./...` + lint |
+| all tests | `make test` — always `./...` with `-race` and a 70% gate; CI runs `go test -race ./...` on the two latest Go releases + lint |
 | doc-sync guard | `go test -count=1 -run TestAgentDocs .` |
 | vet, lint | `make vet`, `make lint` (golangci-lint v2) |
 
