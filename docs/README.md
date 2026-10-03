@@ -25,6 +25,6 @@ Pick a path:
 
 ## Conventions in these docs
 
-- Snippets are trimmed to the point: imports and error handling are often omitted. Runnable versions are the godoc `Example`s in each package.
+- Snippets are trimmed to the point: imports and error handling are often omitted. Complete, compiling versions are the godoc `Example`s in each package; most of them also run as tests.
 - `http` and `grpc` in snippets mean `github.com/im-kulikov/go-bones/network/http` and `.../network/grpc` — they re-export the stdlib/gRPC types you need, so one import is enough.
 - Config keys are shown as YAML; the env name is usually the upper-cased path joined with `_` (`ops.metrics_enabled` → `OPS_METRICS_ENABLED`). Exceptions, such as `tracer.*` → `OTEL_*`, are listed in the [configuration reference](configuration.md#reference).

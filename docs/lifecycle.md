@@ -139,14 +139,15 @@ sequenceDiagram
 | Phase | Duration | What happens |
 |---|---|---|
 | Drain | `health.drain_delay` | Readiness is off, traffic still served while endpoints propagate |
-| Stop | up to `shutdown_timeout` | Servers stop accepting, finish in-flight requests |
+| Stop | up to each server's `shutdown_timeout` | Servers stop accepting, finish in-flight requests |
 | Stop last | — | OPS server and monitor stop; probes answered 503, not "connection refused" |
 
 Details:
 
 - the drain delay applies only to SIGINT/SIGTERM, not when a service fails;
 - a second signal skips the remaining delay;
-- total budget is `drain_delay + shutdown_timeout` — your orchestrator's grace period must be larger ([Kubernetes](kubernetes.md#grace-period));
+- `WithShutdownTimeout` is one deadline for all `Stop` calls: regular services first, then the OPS server and the monitor with whatever time is left. `Run` waits for every `Stop` and `Start` to return and never interrupts them, so your own `Stop` must honor its context and `Start` must return once its context is canceled; a service that does not keeps the process alive. Each server also bounds its own drain with its `shutdown_timeout`;
+- so budget the grace period as `drain_delay` + the largest `shutdown_timeout` + a margin for the OPS server, assuming every service returns once its context is canceled ([Kubernetes](kubernetes.md#grace-period));
 - do **not** combine `drain_delay` with a Kubernetes `preStop: sleep` — the delays add up.
 
 ## Options reference
@@ -154,7 +155,7 @@ Details:
 | Option | Purpose |
 |---|---|
 | `WithService(s...)` | Services to run |
-| `WithShutdownTimeout(d)` | Overall stop budget for `Stop` calls (default 15s; each server also has its own `shutdown_timeout`, 30s by default) |
+| `WithShutdownTimeout(d)` | One deadline shared by all `Stop` calls of both groups (default 15s; each server also has its own `shutdown_timeout`, 30s by default) |
 | `WithHealth(hc)` | Start the monitor, auto-register `Check` implementers |
 | `WithDrainDelay(d)` | Pause between readiness off and stop |
 | `WithShutdownLast(s...)` | Stop these after everything else (usually OPS) |

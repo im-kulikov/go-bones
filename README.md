@@ -80,7 +80,7 @@ func main() {
 ```console
 $ LOGGER_FORMAT=console go run .
 $ curl localhost:8080/hello          # your API
-$ curl localhost:8090/readyz?verbose # probes
+$ curl 'localhost:8090/readyz?verbose' # probes
 readyz check passed
 $ curl localhost:8090/metrics        # Prometheus
 $ go run . --print-config            # the loaded config as YAML, secrets hidden

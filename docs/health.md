@@ -146,7 +146,7 @@ Semantics follow the Kubernetes API server.
 | `GET /livez/<check>`, `/readyz/<check>` | manual debugging | the check passes | otherwise, or the monitor is stopped, or (`/readyz/<check>` only) draining; 404 for unknown names |
 
 ```console
-$ curl -s localhost:8090/readyz?verbose
+$ curl -s 'localhost:8090/readyz?verbose'
 [+]postgres ok
 [-]redis failed: timeout
 readyz check failed

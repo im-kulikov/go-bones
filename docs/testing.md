@@ -36,7 +36,7 @@ func TestResolver(t *testing.T) {
 }
 ```
 
-A missing fake fails the constructor with `needs storage.DNS, nothing built before provides it`.
+A missing fake makes `service.Get` panic with `needs storage.DNS, nothing built before provides it`. To get it as an error instead, build through `service.Build(env, cfg, resolver.New)`.
 
 ## Assembling a stack in tests
 

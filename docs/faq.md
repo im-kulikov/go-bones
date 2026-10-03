@@ -43,7 +43,7 @@ No graph, no reflection, no lifetimes. `app.Add` runs constructors in the order 
 
 ```bash
 kubectl port-forward pod/orders-xyz 8090
-curl localhost:8090/readyz?verbose
+curl 'localhost:8090/readyz?verbose'
 ```
 
 - `[-]postgres failed: timeout` — the check exceeds `health.timeout`; check the client's own timeout and network policy.

@@ -47,9 +47,9 @@ Prometheus metrics (ops) and OpenTelemetry metrics (OTLP push) are independent p
 ## Profiling cheatsheet
 
 ```bash
-go tool pprof -http=: localhost:8090/debug/pprof/profile?seconds=30   # CPU
+go tool pprof -http=: 'localhost:8090/debug/pprof/profile?seconds=30' # CPU
 go tool pprof -http=: localhost:8090/debug/pprof/heap                 # memory
-curl -s localhost:8090/debug/pprof/goroutine?debug=2 | less           # goroutine dump
+curl -s 'localhost:8090/debug/pprof/goroutine?debug=2' | less           # goroutine dump
 ```
 
 With `GOEXPERIMENT=goroutineleakprofile` (Go 1.26) there is also `/debug/pprof/goroutineleak`.

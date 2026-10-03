@@ -80,7 +80,7 @@ LOGGER_FORMAT=console go run .   # colored logs for local development; json is t
 
 ```bash
 curl localhost:8080/hello/gopher      # hello, gopher
-curl localhost:8090/readyz?verbose    # readyz check passed
+curl 'localhost:8090/readyz?verbose'  # readyz check passed
 curl localhost:8090/healthz           # JSON report
 curl -s localhost:8090/metrics | grep go_bones_health
 ```

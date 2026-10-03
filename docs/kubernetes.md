@@ -26,7 +26,7 @@ terminationGracePeriodSeconds  >  health.drain_delay + shutdown_timeout
           45s                  >        5s          +       30s
 ```
 
-`shutdown_timeout` is per server (`30s` by default) — take the largest one among your servers.
+`shutdown_timeout` is per server (`30s` by default) — take the largest one among your servers and keep a margin: the OPS server stops after the others. This holds only if every service returns from `Start` once its context is canceled ([Lifecycle](lifecycle.md#shutdown-and-drain)).
 
 Set `HEALTH_DRAIN_DELAY=5s` so endpoint controllers and kube-proxy/ingress notice the pod is not ready before it stops accepting connections. Don't also add `preStop: sleep` — the delays add up.
 
