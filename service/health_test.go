@@ -432,3 +432,16 @@ func TestRunContext_CanceledParent(t *testing.T) {
 		})
 	}
 }
+
+func TestWithLauncherHealthCheck_ClonesOptions(t *testing.T) {
+	opts := []health.Option{health.WithImpact(health.Informational)}
+	svc := NewLauncher("worker", func(context.Context) error { return nil },
+		WithLauncherHealthCheck(func(context.Context) error { return nil }, opts...))
+
+	opts[0] = nil // the caller reuses its slice
+	got := svc.(health.Configurer).HealthOptions()
+	require.NotNil(t, got[0], "options are copied when the launcher is built")
+
+	got[0] = nil
+	require.NotNil(t, svc.(health.Configurer).HealthOptions()[0], "and when they are handed out")
+}

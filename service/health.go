@@ -85,7 +85,7 @@ func WithShutdownLast(v ...Service) Option {
 func WithLauncherHealthCheck(fn func(context.Context) error, opts ...health.Option) LauncherOption {
 	return func(l *launcher) {
 		l.check = fn
-		l.checkOpts = opts
+		l.checkOpts = slices.Clone(opts) // the caller may reuse its slice
 	}
 }
 
@@ -97,7 +97,7 @@ func (l checkedLauncher) Check(ctx context.Context) error { return l.check(ctx) 
 
 // HealthOptions implements health.Configurer with the options passed to
 // WithLauncherHealthCheck.
-func (l checkedLauncher) HealthOptions() []health.Option { return l.checkOpts }
+func (l checkedLauncher) HealthOptions() []health.Option { return slices.Clone(l.checkOpts) }
 
 // sameService compares services without panicking on non-comparable types.
 func sameService(a, b Service) bool {

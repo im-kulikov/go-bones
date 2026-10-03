@@ -65,7 +65,8 @@ User view: [Lifecycle](../lifecycle.md), [Getting started](../getting-started.md
   [0, 1] and turns NaN into 0: a NaN jitter makes every interval negative and
   spins the timer.
 - `WithLauncherHealthCheck` returns `checkedLauncher`, which implements
-  `HealthChecker` and `health.Configurer`.
+  `HealthChecker` and `health.Configurer`. Its options are cloned when stored
+  and when handed out, like the shutdown hooks.
 
 ## Tests
 
