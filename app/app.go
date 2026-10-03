@@ -100,8 +100,9 @@ func Init[C any, PC interface {
 
 // Add builds a component with ctor from cfg and returns it. The constructor gets
 // the application service.Env and can service.Get anything added before it.
-// A service is started by Run. A constructor error or an unresolved dependency
-// is logged with the file and line of the Add call and exits with code 1.
+// A service is started by Run. A constructor error, an unresolved dependency or
+// a typed nil result is logged with the file and line of the Add call and exits
+// with code 1.
 func Add[C, T any](cfg C, ctor service.Constructor[C, T]) T {
 	a := current()
 

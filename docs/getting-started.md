@@ -63,7 +63,7 @@ What `app.Init` did for you:
 2. Initialized the logger (`logger.Init`) and OpenTelemetry (`tracer.Init`, disabled by default).
 3. Created the health monitor and the ops server on `:8090` with `/livez`, `/readyz`, `/healthz`, `/metrics`, `/debug/pprof`.
 
-What `app.Add(cfg.API, newAPI)` does: calls `newAPI(cfg.API, env)`, remembers the result for later constructors, and — because it is a `service.Service` — starts it in `Run`. If the constructor fails, the process exits with code `1` and a message like `main.go:31: could not build component … main.newAPI: …`.
+What `app.Add(cfg.API, newAPI)` does: calls `newAPI(cfg.API, env)`, remembers the result for later constructors, and — because it is a `service.Service` — starts it in `Run`. A constructor may return a nil interface to say the component is disabled; a typed nil, such as a nil `*pgxpool.Pool`, is a failure. If the constructor fails, the process exits with code `1` and a message like `main.go:31: could not build component … main.newAPI: …`.
 
 What `app.Run()` does:
 

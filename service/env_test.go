@@ -74,6 +74,22 @@ func TestBuild_NilResultIsNotAdded(t *testing.T) {
 	require.ErrorIs(t, err, ErrDependency)
 }
 
+func TestBuild_TypedNilIsAnError(t *testing.T) {
+	env := TestEnv(t)
+
+	_, err := Build(env, envConfig{}, func(envConfig, Env) (*envRepo, error) { return nil, nil })
+	require.ErrorIs(t, err, ErrNilComponent)
+	require.ErrorContains(t, err, "*service.envRepo")
+
+	_, err = Build(env, envConfig{}, func(envConfig, Env) (envStore, error) {
+		return (*envRepo)(nil), nil
+	})
+	require.ErrorIs(t, err, ErrNilComponent)
+
+	_, err = Build(env, envConfig{}, newEnvConsumer)
+	require.ErrorIs(t, err, ErrDependency, "a typed nil is not stored")
+}
+
 func TestBuild_OtherPanicsPropagate(t *testing.T) {
 	require.PanicsWithValue(t, "boom", func() {
 		_, _ = Build(TestEnv(t), envConfig{}, func(envConfig, Env) (int, error) { panic("boom") })

@@ -17,6 +17,11 @@ import (
 // for a dependency that is missing or ambiguous.
 const ErrDependency bones.Error = "unresolved dependency"
 
+// ErrNilComponent is wrapped by the error Build returns when a constructor
+// returns a typed nil, such as a nil *T: Get could not tell it from a real
+// dependency. A nil interface means a disabled component and is not an error.
+const ErrNilComponent bones.Error = "constructor returned a typed nil"
+
 // Env is what an application gives every component constructor.
 //
 // Components get their dependencies from Env with Get, by type, from the values
@@ -92,8 +97,10 @@ func Get[T any](env Env) T {
 	}
 }
 
-// Build calls ctor with cfg and env, and adds a non-nil result to env, so the
-// constructors built after it can Get it. The error names the constructor.
+// Build calls ctor with cfg and env, and adds the result to env, so the
+// constructors built after it can Get it. A nil interface result (a disabled
+// component) is not added; a typed nil is an error wrapping ErrNilComponent.
+// The error names the constructor.
 func Build[C, T any](env Env, cfg C, ctor Constructor[C, T]) (_ T, err error) {
 	name := runtime.FuncForPC(reflect.ValueOf(ctor).Pointer()).Name()
 
@@ -113,9 +120,27 @@ func Build[C, T any](env Env, cfg C, ctor Constructor[C, T]) (_ T, err error) {
 		return v, fmt.Errorf("%s: %w", name, err)
 	}
 
+	if typedNil(v) {
+		return v, fmt.Errorf("%s: %w: %T", name, ErrNilComponent, v)
+	}
+
 	if env.values != nil && any(v) != nil {
 		*env.values = append(*env.values, v)
 	}
 
 	return v, nil
+}
+
+// typedNil reports a nil pointer, map, slice, func or chan held by a non-nil
+// interface.
+func typedNil(v any) bool {
+	rv := reflect.ValueOf(v)
+
+	switch rv.Kind() {
+	case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan,
+		reflect.UnsafePointer:
+		return rv.IsNil()
+	default:
+		return false
+	}
 }
