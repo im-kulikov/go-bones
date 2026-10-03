@@ -116,7 +116,7 @@ func (h *consoleHandler) Handle(ctx context.Context, r Record) error {
 	}
 
 	if v, ok := h.builtin(slog.String(slog.MessageKey, r.Message)); ok {
-		parts = append(parts, v.String())
+		parts = append(parts, oneLine(v.String()))
 	}
 
 	if attrs := strings.TrimSuffix(h.buf.String(), "\n"); attrs != "" {
@@ -136,6 +136,15 @@ func (h *consoleHandler) builtin(a slog.Attr) (slog.Value, bool) {
 	}
 
 	return a.Value.Resolve(), !a.Equal(slog.Attr{})
+}
+
+// oneLine escapes line breaks, so a message cannot add lines to the log.
+func oneLine(s string) string {
+	if !strings.ContainsAny(s, "\r\n") {
+		return s
+	}
+
+	return strings.NewReplacer("\n", `\n`, "\r", `\r`).Replace(s)
 }
 
 func consoleTime(v slog.Value) string {

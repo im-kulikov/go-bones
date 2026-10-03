@@ -191,3 +191,14 @@ func TestConsoleHandler_ZeroTimeSkipsReplaceAttr(t *testing.T) {
 	require.NoError(t, h.Handle(t.Context(), slog.NewRecord(time.Time{}, slog.LevelInfo, "hi", 0)))
 	require.Equal(t, []string{slog.LevelKey, slog.MessageKey}, keys)
 }
+
+func TestConsoleHandler_OneLinePerRecord(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+
+	buf := new(bytes.Buffer)
+	h := NewConsoleHandler(buf, nil)
+
+	r := slog.NewRecord(time.Time{}, slog.LevelInfo, "user\nINF forged\r", 0)
+	require.NoError(t, h.Handle(t.Context(), r))
+	require.Equal(t, `INF user\nINF forged\r`+"\n", buf.String())
+}

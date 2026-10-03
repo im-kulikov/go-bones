@@ -49,6 +49,8 @@ step. Full contract: `.github/instructions/logger.instructions.md`.
 - `NewConsoleHandler` keeps the `slog` contract of `ReplaceAttr`: time (unless
   zero), level and msg go through it once, in `builtin`, before the prefix is
   printed; the inner `TextHandler` drops them so they are not printed twice.
+  Line breaks in the message are escaped (`oneLine`): one record, one line;
+  attribute values are already quoted by the `TextHandler`.
 
 ## Tests
 
