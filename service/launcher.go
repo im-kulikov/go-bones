@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 
 	"github.com/im-kulikov/go-bones"
+	"github.com/im-kulikov/go-bones/health"
 	"github.com/im-kulikov/go-bones/logger"
 )
 
@@ -46,6 +47,8 @@ type launcher struct {
 	logs    *logger.Logger
 	hook    []func(context.Context)
 	check   func(context.Context) error
+	// checkOpts configure the check registration, see WithLauncherHealthCheck.
+	checkOpts []health.Option
 
 	init atomic.Bool
 	halt atomic.Bool

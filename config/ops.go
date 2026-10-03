@@ -5,12 +5,11 @@ package config
 // The *Enabled switches default to true only through their struct tags, i.e.
 // when the config is loaded with gonfig (config.Load / gonfig.SetDefaults). An
 // Ops built as a struct literal has them all false, so NewOPSServer returns a
-// nil service; set Enabled and the wanted endpoint switches explicitly, or
-// apply gonfig.SetDefaults before overriding fields.
+// nil service; start from Defaults[Ops]() and override fields instead.
 //
 // nolint:lll
 type Ops struct {
-	Network `yaml:",inline" env:",squash"`
+	Network
 
 	Address string `yaml:"address" env:"ADDRESS" toml:"address" json:"address" default:":8090"`
 	Enabled bool   `yaml:"enabled" env:"ENABLED" toml:"enabled" json:"enabled" default:"true"`

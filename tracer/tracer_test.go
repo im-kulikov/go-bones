@@ -15,7 +15,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	otellogglobal "go.opentelemetry.io/otel/log/global"
 	otellognoop "go.opentelemetry.io/otel/log/noop"
 	metricnoop "go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/propagation"
@@ -867,12 +866,12 @@ func newTestApp(t *testing.T, top context.Context) *testApp {
 	prevTraceProvider := otel.GetTracerProvider()
 	prevMeterProvider := otel.GetMeterProvider()
 	prevPropagator := otel.GetTextMapPropagator()
-	prevLogProvider := otellogglobal.GetLoggerProvider()
+	prevLogProvider := otel.GetLoggerProvider()
 	t.Cleanup(func() {
 		otel.SetTracerProvider(prevTraceProvider)
 		otel.SetMeterProvider(prevMeterProvider)
 		otel.SetTextMapPropagator(prevPropagator)
-		otellogglobal.SetLoggerProvider(prevLogProvider)
+		otel.SetLoggerProvider(prevLogProvider)
 		logger.SetOpenTelemetryBridge(false)
 	})
 

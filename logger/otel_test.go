@@ -11,9 +11,9 @@ import (
 	"unsafe"
 
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	otellog "go.opentelemetry.io/otel/log"
-	logglobal "go.opentelemetry.io/otel/log/global"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
@@ -50,15 +50,15 @@ func installOTelLogProvider(
 ) {
 	t.Helper()
 
-	prev := logglobal.GetLoggerProvider()
+	prev := otel.GetLoggerProvider()
 	provider := sdklog.NewLoggerProvider(
 		sdklog.WithProcessor(processor),
 	)
-	logglobal.SetLoggerProvider(provider)
+	otel.SetLoggerProvider(provider)
 
 	t.Cleanup(func() {
 		SetOpenTelemetryBridge(false)
-		logglobal.SetLoggerProvider(prev)
+		otel.SetLoggerProvider(prev)
 		_ = provider.Shutdown(context.Background())
 	})
 }

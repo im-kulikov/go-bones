@@ -57,6 +57,11 @@ func ServiceName(name string) Option {
 	return func(settings *serverOptions) { settings.name = name }
 }
 
+// WithHandler sets the handler of the server, usually a ServeMux or a router.
+func WithHandler(h Handler) Option {
+	return ServerOptions(func(s *Server) { s.Handler = h })
+}
+
 // ServerOptions applies raw http.Server mutators to the constructed server.
 func ServerOptions(opts ...ServerOption) Option {
 	return func(s *serverOptions) {
@@ -235,10 +240,13 @@ func (h *serverOptions) listen(top context.Context) error {
 		h.InfoContext(ctx, "try to graceful shutdown",
 			logger.String("name", h.name))
 
+		// Shutdown gives up at the deadline and leaves active connections open;
+		// close them, like the hard Stop after GracefulStop in network/grpc.
 		if errStop := h.Shutdown(ctx); errStop != nil {
-			h.ErrorContext(ctx, "something went wrong",
-				logger.String("name", h.name),
-				logger.Err(errors.Join(ErrHTTPShutdownServer, errStop, context.Cause(ctx))))
+			errClose := h.Close()
+			errStop = errors.Join(ErrHTTPShutdownServer, errStop, context.Cause(ctx), errClose)
+			h.ErrorContext(ctx, "graceful shutdown timed out, closing active connections",
+				logger.String("name", h.name), logger.Err(errStop))
 		}
 	})()
 

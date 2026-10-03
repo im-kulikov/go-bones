@@ -130,6 +130,11 @@ func TestRegisterAfterStart(t *testing.T) {
 
 		m.Stop(t.Context())
 		require.ErrorIs(t, m.Start(t.Context()), ErrMonitorStopped)
+
+		canceled, cancel := context.WithCancel(t.Context())
+		cancel()
+		require.ErrorIs(t, m.Start(canceled), context.Canceled,
+			"Stop before Start during a shutdown is not a failure")
 		require.ErrorIs(t, bonesErr(m.Status("late")), ErrMonitorStarted)
 	})
 }

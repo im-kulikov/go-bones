@@ -138,9 +138,7 @@ func errGetter[K comparable](_ K, err error) error {
 
 func TestWithConfig(t *testing.T) {
 	var example struct {
-		config.Base `yaml:",inline" env:",squash"`
-
-		ConfigPath string `flag:"config,short:c,config:true"`
+		config.Base
 	}
 
 	file, err := os.CreateTemp(t.TempDir(), "config.yaml")

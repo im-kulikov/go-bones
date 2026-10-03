@@ -91,13 +91,11 @@ func TestServer_GracefulShutdown_WithInMemoryTransport(t *testing.T) {
 			cfg,
 			logger.ForTests(logger.TestLoggerWriteToTB(t)),
 			func(options *serverOptions) { options.open = pipeListenerOpener{listener} },
-			ServerOptions(func(server *Server) {
-				server.Handler = HandlerFunc(func(w ResponseWriter, _ *Request) {
-					close(requestStarted)
-					<-releaseRequest
-					w.WriteHeader(StatusNoContent)
-				})
-			}),
+			WithHandler(HandlerFunc(func(w ResponseWriter, _ *Request) {
+				close(requestStarted)
+				<-releaseRequest
+				w.WriteHeader(StatusNoContent)
+			})),
 		)
 		require.NoError(t, err)
 
@@ -140,7 +138,8 @@ func TestServer_GracefulShutdown_WithInMemoryTransport(t *testing.T) {
 // TestServer_ShutdownTimeout_WithInMemoryTransport pins the configured (and
 // fallback) ShutdownTimeout exactly: with virtual time the server must keep
 // waiting for an active request until just before the deadline and must stop
-// once it expires, without adding any wall-clock delay to the suite.
+// once it expires, closing the still active connection, without adding any
+// wall-clock delay to the suite.
 func TestServer_ShutdownTimeout_WithInMemoryTransport(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -222,9 +221,7 @@ func TestServer_ShutdownTimeout_WithInMemoryTransport(t *testing.T) {
 				synctest.Wait()
 				require.Len(t, runDone, 1, "server must stop once the shutdown timeout expires")
 				require.NoError(t, <-runDone)
-
-				release()
-				require.NoError(t, <-requestDone)
+				require.Error(t, <-requestDone, "the active request must be force-closed")
 			})
 		})
 	}
