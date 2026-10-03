@@ -46,6 +46,9 @@ step. Full contract: `.github/instructions/logger.instructions.md`.
   shutdown). When it is on, `openTracingTransform` skips span events so a line
   is not shipped twice.
 - Framework loggers are named `go-bones:<component>` via `Named`.
+- `NewConsoleHandler` keeps the `slog` contract of `ReplaceAttr`: time (unless
+  zero), level and msg go through it once, in `builtin`, before the prefix is
+  printed; the inner `TextHandler` drops them so they are not printed twice.
 
 ## Tests
 

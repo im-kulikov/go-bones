@@ -116,3 +116,78 @@ func TestFormatFor(t *testing.T) {
 		require.Equal(t, want, buf.String(), format)
 	}
 }
+
+// TestConsoleHandler_ReplaceAttrBuiltins: like the slog handlers, ReplaceAttr
+// also gets time, level and msg; a changed value is printed in its place and
+// an empty attribute drops it.
+func TestConsoleHandler_ReplaceAttrBuiltins(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+
+	at := time.Date(2026, 9, 27, 21, 15, 3, 0, time.UTC)
+
+	t.Run("replaced", func(t *testing.T) {
+		buf := new(bytes.Buffer)
+		h := NewConsoleHandler(buf, &HandlerOptions{
+			ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+				if len(groups) > 0 {
+					return a
+				}
+
+				switch a.Key {
+				case slog.TimeKey:
+					return slog.String(a.Key, "now")
+				case slog.LevelKey:
+					if a.Value.Any() == slog.LevelWarn {
+						return slog.String(a.Key, "WARNING")
+					}
+
+					return slog.Any(a.Key, slog.LevelError)
+				case slog.MessageKey:
+					return slog.String(a.Key, strings.ToUpper(a.Value.String()))
+				}
+
+				return a
+			},
+		})
+
+		require.NoError(t, h.Handle(t.Context(), slog.NewRecord(at, slog.LevelInfo, "hello", 0)))
+		require.NoError(t, h.Handle(t.Context(), slog.NewRecord(at, slog.LevelWarn, "careful", 0)))
+		require.Equal(t, "now ERR HELLO\nnow WARNING CAREFUL\n", buf.String())
+	})
+
+	t.Run("dropped", func(t *testing.T) {
+		buf := new(bytes.Buffer)
+		h := NewConsoleHandler(buf, &HandlerOptions{
+			ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+				switch {
+				case len(groups) > 0:
+					return a
+				case a.Key == slog.TimeKey, a.Key == slog.LevelKey, a.Key == slog.MessageKey:
+					return slog.Attr{}
+				}
+
+				return a
+			},
+		})
+
+		r := slog.NewRecord(at, slog.LevelInfo, "hello", 0)
+		r.AddAttrs(slog.Int("status", 200))
+		require.NoError(t, h.Handle(t.Context(), r))
+		require.Equal(t, "status=200\n", buf.String())
+	})
+}
+
+func TestConsoleHandler_ZeroTimeSkipsReplaceAttr(t *testing.T) {
+	var keys []string
+
+	h := NewConsoleHandler(new(bytes.Buffer), &HandlerOptions{
+		ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
+			keys = append(keys, a.Key)
+
+			return a
+		},
+	})
+
+	require.NoError(t, h.Handle(t.Context(), slog.NewRecord(time.Time{}, slog.LevelInfo, "hi", 0)))
+	require.Equal(t, []string{slog.LevelKey, slog.MessageKey}, keys)
+}

@@ -28,16 +28,21 @@ const (
 // attributes, groups and source are formatted by a slog.TextHandler, so they
 // look exactly like the text format.
 type consoleHandler struct {
-	mu    *sync.Mutex
-	out   io.Writer
-	buf   *bytes.Buffer
-	attrs slog.Handler
-	color bool
+	mu      *sync.Mutex
+	out     io.Writer
+	buf     *bytes.Buffer
+	attrs   slog.Handler
+	replace func([]string, slog.Attr) slog.Attr
+	color   bool
 }
 
 // NewConsoleHandler returns the handler behind LOGGER_FORMAT=console: colored,
 // human-readable lines for local development. Prefer text or json in
 // production, where logs are parsed by machines.
+//
+// As in the slog handlers, opts.ReplaceAttr also gets the time, level and
+// message: a changed value is printed in its place, an empty attribute drops
+// it from the line. Their keys are not printed.
 func NewConsoleHandler(w io.Writer, opts *HandlerOptions) Handler {
 	var o HandlerOptions
 	if opts != nil {
@@ -63,11 +68,12 @@ func NewConsoleHandler(w io.Writer, opts *HandlerOptions) Handler {
 	buf := new(bytes.Buffer)
 
 	return &consoleHandler{
-		mu:    new(sync.Mutex),
-		out:   w,
-		buf:   buf,
-		attrs: slog.NewTextHandler(buf, &o),
-		color: os.Getenv("NO_COLOR") == "",
+		mu:      new(sync.Mutex),
+		out:     w,
+		buf:     buf,
+		attrs:   slog.NewTextHandler(buf, &o),
+		replace: replace,
+		color:   os.Getenv("NO_COLOR") == "",
 	}
 }
 
@@ -98,38 +104,70 @@ func (h *consoleHandler) Handle(ctx context.Context, r Record) error {
 		return err
 	}
 
-	var line strings.Builder
-	if !r.Time.IsZero() {
-		line.WriteString(h.paint(colorDim, r.Time.Format("15:04:05.000")))
-		line.WriteByte(' ')
+	parts := make([]string, 0, 4)
+	if !r.Time.IsZero() { // a zero time is omitted before ReplaceAttr, as in slog
+		if v, ok := h.builtin(slog.Time(slog.TimeKey, r.Time)); ok {
+			parts = append(parts, h.paint(colorDim, consoleTime(v)))
+		}
 	}
 
-	line.WriteString(h.level(r.Level))
-	line.WriteByte(' ')
-	line.WriteString(r.Message)
+	if v, ok := h.builtin(slog.Any(slog.LevelKey, r.Level)); ok {
+		parts = append(parts, h.level(v, r.Level))
+	}
+
+	if v, ok := h.builtin(slog.String(slog.MessageKey, r.Message)); ok {
+		parts = append(parts, v.String())
+	}
 
 	if attrs := strings.TrimSuffix(h.buf.String(), "\n"); attrs != "" {
-		line.WriteByte(' ')
-		line.WriteString(attrs)
+		parts = append(parts, attrs)
 	}
 
-	line.WriteByte('\n')
-
-	_, err := io.WriteString(h.out, line.String())
+	_, err := io.WriteString(h.out, strings.Join(parts, " ")+"\n")
 
 	return err
 }
 
-func (h *consoleHandler) level(l Level) string {
+// builtin passes a built-in attribute through ReplaceAttr, as the slog
+// handlers do, and reports whether it is still printed.
+func (h *consoleHandler) builtin(a slog.Attr) (slog.Value, bool) {
+	if h.replace != nil {
+		a = h.replace(nil, a)
+	}
+
+	return a.Value.Resolve(), !a.Equal(slog.Attr{})
+}
+
+func consoleTime(v slog.Value) string {
+	if v.Kind() == slog.KindTime {
+		return v.Time().Format("15:04:05.000")
+	}
+
+	return v.String()
+}
+
+// level prints a level as three colored letters; a value ReplaceAttr made of
+// it that is not a Level is printed as is, in the color of the record level.
+func (h *consoleHandler) level(v slog.Value, l Level) string {
+	if replaced, ok := v.Any().(Level); ok {
+		return h.paint(levelStyle(replaced))
+	}
+
+	color, _ := levelStyle(l)
+
+	return h.paint(color, v.String())
+}
+
+func levelStyle(l Level) (color, name string) {
 	switch {
 	case l < slog.LevelInfo:
-		return h.paint(colorBlue, "DBG")
+		return colorBlue, "DBG"
 	case l < slog.LevelWarn:
-		return h.paint(colorGreen, "INF")
+		return colorGreen, "INF"
 	case l < slog.LevelError:
-		return h.paint(colorYelow, "WRN")
+		return colorYelow, "WRN"
 	default:
-		return h.paint(colorRed, "ERR")
+		return colorRed, "ERR"
 	}
 }
 
