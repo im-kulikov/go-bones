@@ -119,7 +119,7 @@ api:
 ./orders --print-config=env > .env      # for docker --env-file or a ConfigMap
 ```
 
-The output loads back through `--config` as it is.
+YAML, JSON and TOML output loads back through `--config` as it is, once the loader for that format is enabled (YAML is on by default; `config.WithJSON()`, `config.WithTOML()`). The `env` output is not a config file: pass it as environment variables (`docker --env-file`, a ConfigMap).
 
 ## Secrets
 
