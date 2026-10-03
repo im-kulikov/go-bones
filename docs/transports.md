@@ -22,7 +22,7 @@ api, err := http.NewServer(cfg.API, log,
 Behavior worth knowing:
 
 - the listener is opened in `Start`; a busy port fails the application immediately;
-- graceful stop uses `shutdown_timeout`, then force-closes connections;
+- graceful stop waits up to `shutdown_timeout` for in-flight requests, then force-closes the connections still open;
 - `http.WithOpenTelemetry()` continues incoming trace context and creates server spans;
 - any other `*http.Server` field can be set with `http.ServerOptions(func(s *http.Server) { ... })`.
 
