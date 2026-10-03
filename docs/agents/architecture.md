@@ -80,9 +80,11 @@ the whole application; non-ignored errors are joined into `Run`'s result.
    `tracer.Init` is the first service in the list (nil when disabled).
 2. `Add(cfg, ctor)` — `service.Build`; on error logs `file:line` of the call and
    exits 1; a result implementing `service.Service` is appended.
-3. `Run()` — `service.RunContext` with `WithHealth(monitor)`,
+3. `Run()` — `service.RunContext(Env.Context, …)` with `WithHealth(monitor)`,
    `WithDrainDelay(health.drain_delay)`, `WithShutdownLast(ops)`, the services,
-   then OPS. Failure exits 1.
+   then OPS. Failure exits 1. Running under the signal context of `Init` is
+   what stops it on a signal received while components were built: `Init`'s
+   subscription consumed that signal, `Run`'s own one never sees it.
 
 Exits go through the `exit` variable so tests can replace `os.Exit`. `Add`/`Run`
 before `Init` panic.

@@ -39,7 +39,6 @@ import (
 )
 
 type application struct {
-	top    context.Context
 	cancel context.CancelFunc
 	base   *config.Base
 	env    service.Env
@@ -85,7 +84,6 @@ func Init[C any, PC interface {
 	ctx, cancel := service.SignalContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 
 	std = &application{
-		top:    context.Background(),
 		cancel: cancel,
 		base:   base,
 		env:    service.NewEnv(ctx, log, monitor),
@@ -127,12 +125,14 @@ func Add[C, T any](cfg C, ctor service.Constructor[C, T]) T {
 
 // Run starts every added service and the OPS server, and blocks until a signal
 // or a service failure, then shuts down in phases (see service.WithHealth and
-// service.WithDrainDelay). A clean shutdown returns; a failure exits with code 1.
+// service.WithDrainDelay). It runs under the signal context of Init, so a signal
+// received while components were built stops it right away. A clean shutdown
+// returns; a failure exits with code 1.
 func Run() {
 	a := current()
 	defer a.cancel()
 
-	err := service.RunContext(a.top, a.env.Logger,
+	err := service.RunContext(a.env.Context, a.env.Logger,
 		service.WithHealth(a.health),
 		service.WithDrainDelay(a.base.Health.DrainDelay),
 		service.WithShutdownLast(a.ops),

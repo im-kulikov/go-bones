@@ -3,7 +3,10 @@ package app
 import (
 	"context"
 	"errors"
+	"os"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/im-kulikov/gonfig"
 	"github.com/stretchr/testify/require"
@@ -53,6 +56,15 @@ func newAPI(cfg apiConfig, env service.Env) (service.Service, error) {
 }
 
 func newBroken(apiConfig, service.Env) (service.Service, error) { return nil, errBroken }
+
+// newWorker is a service that runs until it is stopped.
+func newWorker(apiConfig, service.Env) (service.Service, error) {
+	return service.NewLauncher("worker", func(ctx context.Context) error {
+		<-ctx.Done()
+
+		return nil
+	}), nil
+}
 
 // setup isolates the process-wide application and turns exit into a panic.
 func setup(t *testing.T) {
@@ -112,6 +124,28 @@ func TestApp_InitAddRun(t *testing.T) {
 	require.NotNil(t, std.ops)
 
 	require.Equal(t, -1, exitOf(t, Run), "a clean shutdown does not exit")
+}
+
+// TestApp_SignalBeforeRun: a signal received while components are built cancels
+// Env.Context; Run must stop on it too instead of waiting for another one.
+func TestApp_SignalBeforeRun(t *testing.T) {
+	setup(t)
+
+	cfg := initApp()
+	Add(cfg.API, newWorker)
+
+	require.NoError(t, syscall.Kill(os.Getpid(), syscall.SIGTERM))
+	<-std.env.Context.Done()
+
+	done := make(chan int, 1)
+	go func() { done <- exitOf(t, Run) }()
+
+	select {
+	case code := <-done:
+		require.Equal(t, -1, code, "a signal is a clean shutdown")
+	case <-time.After(5 * time.Second):
+		require.FailNow(t, "Run ignored the signal received after Init")
+	}
 }
 
 func TestApp_ServiceFailureExits(t *testing.T) {

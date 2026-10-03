@@ -68,7 +68,7 @@ What `app.Add(cfg.API, newAPI)` does: calls `newAPI(cfg.API, env)`, remembers th
 What `app.Run()` does:
 
 1. Starts every service, the health monitor and the ops server.
-2. Waits for SIGINT/SIGTERM or for any service to fail.
+2. Waits for SIGINT/SIGTERM or for any service to fail. A signal that arrived while components were being built stops it right away.
 3. Drains: `/readyz` → 503, waits `health.drain_delay`, stops the API, stops the ops server last.
 4. Returns on a clean shutdown, exits with code `1` on failure.
 
