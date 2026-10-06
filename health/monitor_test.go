@@ -130,6 +130,11 @@ func TestRegisterAfterStart(t *testing.T) {
 
 		m.Stop(t.Context())
 		require.ErrorIs(t, m.Start(t.Context()), ErrMonitorStopped)
+
+		canceled, cancel := context.WithCancel(t.Context())
+		cancel()
+		require.ErrorIs(t, m.Start(canceled), context.Canceled,
+			"Stop before Start during a shutdown is not a failure")
 		require.ErrorIs(t, bonesErr(m.Status("late")), ErrMonitorStarted)
 	})
 }
@@ -586,6 +591,45 @@ func TestLogRepeat(t *testing.T) {
 		synctest.Wait()
 		require.Contains(t, buf.String(), "health check passing")
 		require.Contains(t, buf.String(), "downtime")
+	})
+}
+
+// A polled check failing while its service is still starting stays unknown
+// (not ready, no WARN) until StartPeriod is over; a push status is not held.
+func TestStartPeriod(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		buf := logger.NewSyncBuffer()
+		cfg := testConfig()
+		cfg.StartPeriod = 5 * time.Second
+		m := New(cfg, logger.ForTests(logger.TestLoggerWriter(buf)))
+		m.jitter = func(d time.Duration) time.Duration { return d }
+
+		c := new(counter)
+		c.set(errDown)
+		require.NoError(t, m.Register("db", c))
+
+		push, err := m.Status("broker")
+		require.NoError(t, err)
+
+		stop := start(t, m)
+		defer stop()
+
+		push.Set(errDown) // nothing re-runs a push status, so it is not held
+		require.Equal(t, StatusFailing, m.Snapshot().Checks["broker"].Status)
+
+		time.Sleep(4 * time.Second)
+		synctest.Wait()
+
+		res := m.Snapshot().Checks["db"]
+		require.Equal(t, StatusUnknown, res.Status)
+		require.ErrorIs(t, res.Err, errDown)
+		require.False(t, m.Snapshot().Ready)
+		require.NotContains(t, buf.String(), "check=db impact=readiness from=unknown to=failing")
+
+		time.Sleep(2 * time.Second)
+		synctest.Wait()
+		require.Equal(t, StatusFailing, m.Snapshot().Checks["db"].Status)
+		require.Contains(t, buf.String(), "check=db impact=readiness from=unknown to=failing")
 	})
 }
 

@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"math/big"
 	"net"
 	"net/http/httptest"
@@ -91,13 +92,11 @@ func TestServer_GracefulShutdown_WithInMemoryTransport(t *testing.T) {
 			cfg,
 			logger.ForTests(logger.TestLoggerWriteToTB(t)),
 			func(options *serverOptions) { options.open = pipeListenerOpener{listener} },
-			ServerOptions(func(server *Server) {
-				server.Handler = HandlerFunc(func(w ResponseWriter, _ *Request) {
-					close(requestStarted)
-					<-releaseRequest
-					w.WriteHeader(StatusNoContent)
-				})
-			}),
+			WithHandler(HandlerFunc(func(w ResponseWriter, _ *Request) {
+				close(requestStarted)
+				<-releaseRequest
+				w.WriteHeader(StatusNoContent)
+			})),
 		)
 		require.NoError(t, err)
 
@@ -140,7 +139,8 @@ func TestServer_GracefulShutdown_WithInMemoryTransport(t *testing.T) {
 // TestServer_ShutdownTimeout_WithInMemoryTransport pins the configured (and
 // fallback) ShutdownTimeout exactly: with virtual time the server must keep
 // waiting for an active request until just before the deadline and must stop
-// once it expires, without adding any wall-clock delay to the suite.
+// once it expires, closing the still active connection, without adding any
+// wall-clock delay to the suite.
 func TestServer_ShutdownTimeout_WithInMemoryTransport(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -222,9 +222,7 @@ func TestServer_ShutdownTimeout_WithInMemoryTransport(t *testing.T) {
 				synctest.Wait()
 				require.Len(t, runDone, 1, "server must stop once the shutdown timeout expires")
 				require.NoError(t, <-runDone)
-
-				release()
-				require.NoError(t, <-requestDone)
+				require.Error(t, <-requestDone, "the active request must be force-closed")
 			})
 		})
 	}
@@ -590,4 +588,49 @@ func Test_shouldFailOnListener(t *testing.T) {
 
 		require.ErrorIs(t, svc.Start(t.Context()), errOnServe)
 	})
+}
+
+// closeFailsListener is a pipeListener whose Close reports an error, which
+// http.Server.Shutdown returns once the connections are drained.
+type closeFailsListener struct{ *pipeListener }
+
+func (l closeFailsListener) Close() error {
+	_ = l.pipeListener.Close()
+
+	return errors.New("close failed")
+}
+
+func TestServer_ShutdownErrorIsNotATimeout(t *testing.T) {
+	buf := logger.NewSyncBuffer()
+	listener := closeFailsListener{newPipeListener()}
+	ctx, cancel := context.WithCancel(t.Context())
+
+	svc, err := NewServer(
+		customHTTPSettings{Address: "pipe-listener"},
+		logger.ForTests(logger.TestLoggerWriter(buf)),
+		func(options *serverOptions) { options.open = pipeListenerOpener{listener} },
+		ServerOptions(func(server *Server) {
+			server.Handler = HandlerFunc(func(w ResponseWriter, _ *Request) {
+				w.WriteHeader(StatusNoContent)
+			})
+		}),
+	)
+	require.NoError(t, err)
+
+	done := make(chan error, 1)
+	go func() { done <- svc.Start(ctx) }()
+
+	client := &Client{Transport: &Transport{
+		DialContext:       listener.DialContext,
+		DisableKeepAlives: true,
+	}}
+	response, err := client.Get("http://pipe-listener/") // the server is serving
+	require.NoError(t, err)
+	require.NoError(t, response.Body.Close())
+
+	cancel()
+	require.NoError(t, <-done)
+	require.Contains(t, buf.String(), "graceful shutdown failed")
+	require.Contains(t, buf.String(), "close failed")
+	require.NotContains(t, buf.String(), "timed out")
 }

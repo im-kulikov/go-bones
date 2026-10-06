@@ -5,6 +5,8 @@ import (
 	"io"
 	"iter"
 	"log/slog"
+	"strconv"
+	"sync"
 	"sync/atomic"
 
 	"github.com/im-kulikov/go-bones/config"
@@ -38,9 +40,11 @@ func Default() *Logger {
 // behaviour. Invalid config values do not fail initialization; they fall back to
 // defaults and emit warnings through the current default logger.
 //
-// Supported formats:
-//   - `json`: JSON-formatted logs.
-//   - `text`: human-readable text logs (default).
+// Supported formats (see formatFor):
+//   - `json`: JSON-formatted logs (default).
+//   - `text`: slog key=value text logs.
+//   - `console`: colored, human-readable lines for local runs.
+//   - a name added with RegisterFormat.
 //
 // Supported levels (see slog.Level): DEBUG, INFO, WARN, ERROR
 //
@@ -58,16 +62,7 @@ func optionsFromConfig(cfg config.Logger, opts []Option) iter.Seq[Option] {
 			return
 		}
 
-		format := func(w io.Writer, o *HandlerOptions) Handler { return slog.NewTextHandler(w, o) }
-		switch cfg.Format {
-		case "json":
-			format = func(w io.Writer, o *HandlerOptions) Handler { return slog.NewJSONHandler(w, o) }
-		case "text":
-			// already set
-		default:
-			Warn("could not parse logger.format", String("format", cfg.Format))
-		}
-
+		format := formatFor(cfg.Format)
 		if !yield(func(o *options) { o.format = format }) {
 			return
 		}
@@ -77,6 +72,62 @@ func optionsFromConfig(cfg config.Logger, opts []Option) iter.Seq[Option] {
 				return
 			}
 		}
+	}
+}
+
+// formats holds the formats added with RegisterFormat.
+//
+//nolint:gochecknoglobals // a registry filled from init, like sql.Register.
+var formats sync.Map
+
+// RegisterFormat makes logger.format (LOGGER_FORMAT) name build its handler
+// with ctor, so a service can log in a format go-bones does not ship, for
+// example journald fields with github.com/systemd/slog-journal. Call it in main
+// before app.Init or Init, which pick the format from the config.
+//
+// ctor gets the output (os.Stdout unless WithOutput) and the level and source
+// settings from the config; pass opts.Level on, or LOGGER_LEVEL is ignored.
+// The handler is the last step of the pipeline: secrets are already masked
+// and context attributes merged when it sees a record.
+//
+// A nil ctor, a built-in name or a name registered twice panics.
+func RegisterFormat(name string, ctor HandlerConstructor) {
+	if ctor == nil || builtinFormat(name) != nil {
+		panic("logger: cannot register format " + strconv.Quote(name))
+	}
+
+	if _, dup := formats.LoadOrStore(name, ctor); dup {
+		panic("logger: format " + strconv.Quote(name) + " registered twice")
+	}
+}
+
+// formatFor returns the handler constructor for logger.format: a built-in or
+// a registered one. JSON is the default, as expected in production; an unknown
+// format falls back to it with a warning.
+func formatFor(name string) HandlerConstructor {
+	if ctor := builtinFormat(name); ctor != nil {
+		return ctor
+	}
+
+	if ctor, ok := formats.Load(name); ok {
+		return ctor.(HandlerConstructor)
+	}
+
+	Warn("could not parse logger.format", String("format", name))
+
+	return builtinFormat("json")
+}
+
+func builtinFormat(name string) HandlerConstructor {
+	switch name {
+	case "text":
+		return func(w io.Writer, o *HandlerOptions) Handler { return slog.NewTextHandler(w, o) }
+	case "console":
+		return NewConsoleHandler
+	case "", "json":
+		return func(w io.Writer, o *HandlerOptions) Handler { return slog.NewJSONHandler(w, o) }
+	default:
+		return nil
 	}
 }
 

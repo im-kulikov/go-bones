@@ -18,7 +18,6 @@ import (
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	otellog "go.opentelemetry.io/otel/log"
-	logglobal "go.opentelemetry.io/otel/log/global"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
@@ -277,7 +276,7 @@ func bootstrapProviders(ctx context.Context, cfg config.TracerConfig) (hooks, er
 			return nil, errors.Join(errLogger, out.run(ctx))
 		}
 
-		logglobal.SetLoggerProvider(lProvider)
+		otel.SetLoggerProvider(lProvider)
 		logger.SetOpenTelemetryBridge(true)
 		out = append(out, lProvider.Shutdown)
 		out = append(out, func(context.Context) error {

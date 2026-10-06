@@ -171,6 +171,12 @@ func TestWithHealth_AutoRegistration(t *testing.T) {
 
 			return nil
 		}, WithLauncherHealthCheck(func(context.Context) error { return nil }))
+		upstream := NewLauncher("upstream", func(ctx context.Context) error {
+			<-ctx.Done()
+
+			return nil
+		}, WithLauncherHealthCheck(func(context.Context) error { return nil },
+			health.WithImpact(health.Informational)))
 		plain := &fakeService{name: "plain", log: j}
 
 		ctx, cancel := context.WithCancel(t.Context())
@@ -181,13 +187,20 @@ func TestWithHealth_AutoRegistration(t *testing.T) {
 			done <- RunContext(ctx, logger.ForTests(), signals,
 				WithHealth(hc),
 				WithHealth(nil),
-				WithService(Compose(db, cache, off), worker, plain, hc))
+				WithService(Compose(db, cache, off), worker, upstream, plain, hc))
 		}()
 
 		synctest.Wait()
 
 		snap := hc.Snapshot()
-		require.Equal(t, []string{"cache", "db", "worker"}, snap.Names())
+		require.Equal(t, []string{"cache", "db", "upstream", "worker"}, snap.Names())
+		require.Equal(
+			t,
+			health.Informational,
+			snap.Checks["upstream"].Impact,
+			"launcher check options",
+		)
+		require.Equal(t, health.Readiness, snap.Checks["worker"].Impact)
 		require.Equal(t, health.Informational, snap.Checks["cache"].Impact)
 		require.Equal(t, health.Readiness, snap.Checks["db"].Impact)
 		require.True(t, snap.Ready)
@@ -418,4 +431,17 @@ func TestRunContext_CanceledParent(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestWithLauncherHealthCheck_ClonesOptions(t *testing.T) {
+	opts := []health.Option{health.WithImpact(health.Informational)}
+	svc := NewLauncher("worker", func(context.Context) error { return nil },
+		WithLauncherHealthCheck(func(context.Context) error { return nil }, opts...))
+
+	opts[0] = nil // the caller reuses its slice
+	got := svc.(health.Configurer).HealthOptions()
+	require.NotNil(t, got[0], "options are copied when the launcher is built")
+
+	got[0] = nil
+	require.NotNil(t, svc.(health.Configurer).HealthOptions()[0], "and when they are handed out")
 }

@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"go.opentelemetry.io/otel"
-	otellogglobal "go.opentelemetry.io/otel/log/global"
 	"go.opentelemetry.io/otel/propagation"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdkresource "go.opentelemetry.io/otel/sdk/resource"
@@ -43,7 +42,7 @@ func InstallOTelRecorder(t testing.TB) *OTelRecorder {
 
 	prevTraceProvider := otel.GetTracerProvider()
 	prevPropagator := otel.GetTextMapPropagator()
-	prevLogProvider := otellogglobal.GetLoggerProvider()
+	prevLogProvider := otel.GetLoggerProvider()
 
 	recorder := &OTelRecorder{}
 
@@ -63,12 +62,12 @@ func InstallOTelRecorder(t testing.TB) *OTelRecorder {
 		propagation.TraceContext{},
 		propagation.Baggage{},
 	))
-	otellogglobal.SetLoggerProvider(logProvider)
+	otel.SetLoggerProvider(logProvider)
 
 	t.Cleanup(func() {
 		_ = logProvider.Shutdown(context.Background())
 		_ = traceProvider.Shutdown(context.Background())
-		otellogglobal.SetLoggerProvider(prevLogProvider)
+		otel.SetLoggerProvider(prevLogProvider)
 		otel.SetTextMapPropagator(prevPropagator)
 		otel.SetTracerProvider(prevTraceProvider)
 	})

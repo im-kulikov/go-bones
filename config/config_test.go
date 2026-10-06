@@ -12,9 +12,7 @@ import (
 )
 
 type TestConfig struct {
-	Base `yaml:",inline" toml:",inline" json:",inline" env:",squash"`
-
-	Config string `flag:"config,config:true"`
+	Base
 }
 
 type testCase struct {

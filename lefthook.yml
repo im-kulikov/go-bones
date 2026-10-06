@@ -42,6 +42,9 @@ pre-commit:
 
         # Clean up backup files
         rm go.mod.backup go.sum.backup 2>/dev/null || true
+    - name: agent docs
+      glob: "*.md"
+      run: go test -count=1 -run TestAgentDocs .
     - name: lint & test
       glob:
         - "*.go"

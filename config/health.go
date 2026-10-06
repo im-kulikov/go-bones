@@ -13,6 +13,11 @@ type Health struct {
 	Interval time.Duration `yaml:"interval" env:"INTERVAL" toml:"interval" json:"interval" default:"10s"`
 	// InitialInterval is the period used until a check reports its first success.
 	InitialInterval time.Duration `yaml:"initial_interval" env:"INITIAL_INTERVAL" toml:"initial_interval" json:"initial_interval" default:"1s"`
+	// StartPeriod is the time after the monitor starts during which a failing polled
+	// check that has not passed yet stays unknown (not ready, not logged as failing),
+	// so services still starting do not log failures. Push statuses are not held.
+	// 0 turns it off.
+	StartPeriod time.Duration `yaml:"start_period" env:"START_PERIOD" toml:"start_period" json:"start_period"`
 	// Timeout is the deadline of a single Check call.
 	Timeout time.Duration `yaml:"timeout" env:"TIMEOUT" toml:"timeout" json:"timeout" default:"2s"`
 	// MinInterval is the minimal distance between two runs requested by Trigger.
@@ -58,25 +63,15 @@ func (h Health) WithDefaults() Health {
 		h.MinInterval = DefaultHealthMinInterval
 	}
 
-	if h.FailureThreshold < 1 {
-		h.FailureThreshold = 1
-	}
-
-	if h.SuccessThreshold < 1 {
-		h.SuccessThreshold = 1
-	}
-
 	if h.LogRepeatInterval <= 0 {
 		h.LogRepeatInterval = DefaultHealthLogRepeatInterval
 	}
 
-	if h.DrainDelay < 0 {
-		h.DrainDelay = 0
-	}
-
-	if h.StaleAfter < 0 {
-		h.StaleAfter = 0
-	}
+	h.FailureThreshold = max(h.FailureThreshold, 1)
+	h.SuccessThreshold = max(h.SuccessThreshold, 1)
+	h.DrainDelay = max(h.DrainDelay, 0)
+	h.StaleAfter = max(h.StaleAfter, 0)
+	h.StartPeriod = max(h.StartPeriod, 0)
 
 	return h
 }

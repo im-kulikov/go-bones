@@ -1,13 +1,12 @@
 // Package config defines shared configuration types and loading helpers for go-bones services.
 //
-// It also exposes helpers such as DefaultConfigFlag for enabling the standard
-// --config and -c file path flags in application config structs.
+// Base, embedded in the config of an application, also gives it the flags
+// --config / -c (the path of the config file) and --print-config.
 //
 // Example:
 //
 //	type appConfig struct {
-//		Base `env:",squash" yaml:",inline" json:",inline" toml:",inline"`
-//		DefaultConfigFlag `env:",squash" yaml:",inline" json:",inline" toml:",inline"`
+//		Base
 //
 //		HTTP struct {
 //			Address string `env:"ADDRESS" yaml:"address" default:":8080"`

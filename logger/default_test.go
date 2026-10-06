@@ -3,6 +3,7 @@ package logger
 import (
 	"bytes"
 	"context"
+	"io"
 	"log/slog"
 	"slices"
 	"strings"
@@ -34,6 +35,7 @@ func Test_default(t *testing.T) {
 
 	require.NotEmpty(t, Default())
 
+	cfg.Format = "text" // the expected output is in the text format
 	cfg.AddAppInfo = true
 	cfg.Secrets = append(cfg.Secrets, slog.TimeKey)
 	cfg.SetAppNameAndVersion("test-app-name", "test-app-version")
@@ -55,6 +57,7 @@ func Test_default(t *testing.T) {
 
 func Test_defaultWithDefaultLevel(t *testing.T) {
 	var cfg config.Logger
+	cfg.Format = "text" // the expected output is in the text format
 	cfg.AddAppInfo = true
 	cfg.Secrets = append(cfg.Secrets, slog.TimeKey)
 	cfg.SetAppNameAndVersion("test-app-name", "test-app-version")
@@ -84,6 +87,7 @@ func Test_defaultWithDefaultLevel(t *testing.T) {
 
 func Test_WithHandler(t *testing.T) {
 	var cfg config.Logger
+	cfg.Format = "text" // the expected output is in the text format
 	cfg.AddAppInfo = true
 	cfg.Secrets = append(cfg.Secrets, slog.TimeKey)
 	cfg.SetAppNameAndVersion("test-app-name", "test-app-version")
@@ -162,4 +166,22 @@ func TestLogger_fromConfig(t *testing.T) {
 			require.NotPanics(t, func() { Init(cfg) })
 		}
 	})
+}
+
+func TestRegisterFormat(t *testing.T) {
+	var built bool
+	ctor := func(w io.Writer, o *HandlerOptions) Handler {
+		built = true
+
+		return slog.NewTextHandler(w, o)
+	}
+
+	RegisterFormat("test-registered", ctor)
+	t.Cleanup(func() { formats.Delete("test-registered") })
+	formatFor("test-registered")(io.Discard, nil)
+	require.True(t, built, "a registered format is picked by name")
+
+	require.Panics(t, func() { RegisterFormat("test-registered", ctor) }, "twice")
+	require.Panics(t, func() { RegisterFormat("console", ctor) }, "built-in")
+	require.Panics(t, func() { RegisterFormat("test-nil", nil) }, "nil")
 }

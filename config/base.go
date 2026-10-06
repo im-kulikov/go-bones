@@ -10,8 +10,12 @@ import (
 )
 
 // Base provides the standard configuration structure for go-bones applications.
-// It groups logger, operations server, and tracer configuration under a single root.
+// It groups logger, operations server, and tracer configuration under a single root,
+// and gives the command line --config / -c (the config file) and --print-config.
 type Base struct {
+	DefaultConfigFlag // --config, -c
+	PrintConfigFlag   // --print-config[=yaml|json|toml|env]
+
 	Logger    Logger       `env:"LOGGER" yaml:"logger" json:"logger" toml:"logger"`
 	OpsServer Ops          `env:"OPS"    yaml:"ops"    json:"ops"    toml:"ops"`
 	Tracer    TracerConfig `env:"OTEL"   yaml:"tracer" json:"tracer" toml:"tracer"`
@@ -27,6 +31,10 @@ type appSetter interface {
 	SetAppNameAndVersion(name, version string)
 }
 
+// Bones returns the go-bones part of an application config. It is promoted to
+// any struct embedding Base, which lets app.Init find it without reflection.
+func (b *Base) Bones() *Base { return b }
+
 // Network defines the foundational configuration for network-based services,
 // including timeouts and TLS settings.
 //
@@ -34,13 +42,13 @@ type appSetter interface {
 type Network struct {
 	appSettings
 
-	TLSConfig         *TLS          `toml:"tls" yaml:"tls" json:"tls" env:"TLS"`
-	ReadTimeout       time.Duration `toml:"read_timeout" yaml:"read_timeout" json:"readTimeout" env:"READ_TIMEOUT"`
-	WriteTimeout      time.Duration `toml:"write_timeout" yaml:"write_timeout" json:"writeTimeout" env:"WRITE_TIMEOUT"`
+	TLSConfig         *TLS          `toml:"tls"                 yaml:"tls"                 json:"tls"               env:"TLS"`
+	ReadTimeout       time.Duration `toml:"read_timeout"        yaml:"read_timeout"        json:"readTimeout"       env:"READ_TIMEOUT"`
+	WriteTimeout      time.Duration `toml:"write_timeout"       yaml:"write_timeout"       json:"writeTimeout"      env:"WRITE_TIMEOUT"`
 	ReadHeaderTimeout time.Duration `toml:"read_header_timeout" yaml:"read_header_timeout" json:"readHeaderTimeout" env:"READ_HEADER_TIMEOUT"`
-	IdleTimeout       time.Duration `toml:"idle_timeout" yaml:"idle_timeout" json:"idleTimeout" env:"IDLE_TIMEOUT"`
-	ShutdownTimeout   time.Duration `toml:"shutdown_timeout" yaml:"shutdown_timeout" json:"shutdownTimeout" env:"SHUTDOWN_TIMEOUT" default:"30s"`
-	MaxHeaderBytes    int           `toml:"max_header_bytes" yaml:"max_header_bytes" json:"maxHeaderBytes" env:"MAX_HEADER_BYTES"`
+	IdleTimeout       time.Duration `toml:"idle_timeout"        yaml:"idle_timeout"        json:"idleTimeout"       env:"IDLE_TIMEOUT"`
+	ShutdownTimeout   time.Duration `toml:"shutdown_timeout"    yaml:"shutdown_timeout"    json:"shutdownTimeout"   env:"SHUTDOWN_TIMEOUT"    default:"30s"`
+	MaxHeaderBytes    int           `toml:"max_header_bytes"    yaml:"max_header_bytes"    json:"maxHeaderBytes"    env:"MAX_HEADER_BYTES"`
 }
 
 // INetwork defines an interface for network configuration,

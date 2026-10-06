@@ -9,9 +9,11 @@ import (
 	"encoding/pem"
 	"math/big"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/im-kulikov/gonfig"
 	"github.com/stretchr/testify/require"
 )
 
@@ -227,4 +229,28 @@ func TestCipherSuiteIDs(t *testing.T) {
 
 	_, err = cipherSuiteIDs([]string{"TLS_NOT_A_REAL_CIPHER_SUITE"})
 	require.Error(t, err)
+}
+
+// A pointer TLS section set only in a file starts from its default tags too
+// (gonfig v0.7.0), so Prepare works without min_version and client_auth.
+func TestNetwork_TLSFromFileUsesDefaults(t *testing.T) {
+	keyFile, certFile := generateTLSKeyPair(t)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	body := "api:\n  tls:\n    enabled: true\n    cert_file: " + certFile + "\n    key_file: " + keyFile + "\n"
+	require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
+
+	var cfg struct {
+		DefaultConfigFlag
+
+		API HTTP `yaml:"api"`
+	}
+
+	require.NoError(t, Load(&cfg, WithCustomizeLoaderConfig(func(c *gonfig.Config) {
+		c.Args, c.Envs = []string{"--config", path}, []string{}
+	})))
+
+	out, err := cfg.API.PrepareTLSConfig()
+	require.NoError(t, err)
+	require.Equal(t, uint16(tls.VersionTLS13), out.MinVersion)
+	require.Equal(t, tls.NoClientCert, out.ClientAuth)
 }
