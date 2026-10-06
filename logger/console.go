@@ -33,8 +33,11 @@ type consoleHandler struct {
 	buf     *bytes.Buffer
 	attrs   slog.Handler
 	replace func([]string, slog.Attr) slog.Attr
-	color   bool
-	journal bool
+	// builtins is true from the start of Handle until the inner handler has
+	// passed msg to ReplaceAttr. Shared by clones, guarded by mu.
+	builtins *bool
+	color    bool
+	journal  bool
 }
 
 // NewConsoleHandler returns the handler behind LOGGER_FORMAT=console: colored,
@@ -50,12 +53,19 @@ func NewConsoleHandler(w io.Writer, opts *HandlerOptions) Handler {
 		o = *opts
 	}
 
+	// slog passes the built-ins (time, level, source, msg) before the record
+	// attributes, so only what comes before msg is dropped: a user attribute
+	// keyed msg, time or level is kept. Guarded by mu, set by Handle.
+	builtins := new(bool)
 	replace := o.ReplaceAttr
 	o.ReplaceAttr = func(groups []string, a slog.Attr) slog.Attr {
-		if len(groups) == 0 {
+		if *builtins {
 			switch a.Key {
-			case slog.TimeKey, slog.LevelKey, slog.MessageKey:
+			case slog.MessageKey:
+				*builtins = false
 				return slog.Attr{} // printed by the console prefix
+			case slog.TimeKey, slog.LevelKey:
+				return slog.Attr{}
 			}
 		}
 
@@ -69,12 +79,13 @@ func NewConsoleHandler(w io.Writer, opts *HandlerOptions) Handler {
 	buf := new(bytes.Buffer)
 
 	return &consoleHandler{
-		mu:      new(sync.Mutex),
-		out:     w,
-		buf:     buf,
-		attrs:   slog.NewTextHandler(buf, &o),
-		replace: replace,
-		color:   os.Getenv("NO_COLOR") == "",
+		mu:       new(sync.Mutex),
+		out:      w,
+		buf:      buf,
+		attrs:    slog.NewTextHandler(buf, &o),
+		replace:  replace,
+		builtins: builtins,
+		color:    os.Getenv("NO_COLOR") == "",
 	}
 }
 
@@ -98,6 +109,9 @@ func (h *consoleHandler) Enabled(ctx context.Context, level Level) bool {
 }
 
 func (h *consoleHandler) WithAttrs(attrs []Attr) Handler {
+	h.mu.Lock() // the inner handler runs ReplaceAttr on attrs, which reads builtins
+	defer h.mu.Unlock()
+
 	clone := *h
 	clone.attrs = h.attrs.WithAttrs(attrs)
 
@@ -116,6 +130,7 @@ func (h *consoleHandler) Handle(ctx context.Context, r Record) error {
 	defer h.mu.Unlock()
 
 	h.buf.Reset()
+	*h.builtins = true
 	if err := h.attrs.Handle(ctx, r); err != nil {
 		return err
 	}

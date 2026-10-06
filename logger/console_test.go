@@ -80,9 +80,10 @@ func TestConsoleHandler_AttrsGroupsAndOptions(t *testing.T) {
 	require.Equal(t, "WRN bare\n", buf.String())
 
 	broken := &consoleHandler{
-		mu:    h.(*consoleHandler).mu,
-		buf:   new(bytes.Buffer),
-		attrs: failingHandler{},
+		mu:       h.(*consoleHandler).mu,
+		buf:      new(bytes.Buffer),
+		attrs:    failingHandler{},
+		builtins: new(bool),
 	}
 	require.EqualError(t, broken.Handle(t.Context(), r), "write failed")
 }
@@ -222,4 +223,31 @@ func TestJournalHandler(t *testing.T) {
 		`<4>two\nlines err="a\nb"`+"\n"+
 		"<3>error\n"+
 		"<3>fatal\n", buf.String())
+}
+
+// Only the built-in time, level and msg are dropped from the inner line: user
+// attributes with the same keys are printed, also when bound with With from
+// another goroutine (run with -race).
+func TestConsoleHandler_UserAttrsNamedLikeBuiltins(t *testing.T) {
+	for _, format := range []string{"console", "journal"} {
+		buf := new(bytes.Buffer)
+		log := slog.New(formatFor(format)(buf, &HandlerOptions{AddSource: true}))
+
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+
+			for range 50 {
+				log.With("level", "l").Info("x", "msg", "m", "time", "t")
+			}
+		}()
+
+		for range 50 {
+			log.Info("y")
+		}
+		<-done
+
+		require.Contains(t, buf.String(), " level=l msg=m time=t\n", format)
+		require.Contains(t, buf.String(), "source=", format)
+	}
 }

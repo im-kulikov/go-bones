@@ -50,6 +50,10 @@ step. Full contract: `.github/instructions/logger.instructions.md`.
 - `NewConsoleHandler` keeps the `slog` contract of `ReplaceAttr`: time (unless
   zero), level and msg go through it once, in `builtin`, before the prefix is
   printed; the inner `TextHandler` drops them so they are not printed twice.
+  It drops by position, not key: slog passes time, level, source, msg before
+  the record attributes, so the `builtins` flag (set in `Handle`, cleared at
+  msg) keeps user attributes keyed `msg`/`time`/`level`. `WithAttrs` takes
+  `mu` because the inner handler runs `ReplaceAttr` there too.
   Line breaks in the message are escaped (`oneLine`): one record, one line;
   attribute values are already quoted by the `TextHandler`.
 - `journal` is the console handler with `journal` set: no colors, no time or
