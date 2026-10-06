@@ -49,6 +49,9 @@ User view: [Configuration](../configuration.md) — its
 - `TLS.Prepare` validates before touching files; `ErrTLSDisabled` means "no
   TLS" and callers treat it as a non-error. Cipher suites with `TLS13` are
   rejected (`ErrCipherSuitesIneffectiveAtTLS13`) on purpose.
+- A pointer section (`Network.TLSConfig *TLS`) stays nil until some source
+  sets one of its fields; then gonfig (v0.7.0+) applies its `default` tags
+  (`config/tls_test.go` `TestNetwork_TLSFromFileUsesDefaults`).
 - Mark secret values with `secret:"true"` so `--help`/`--print-config` hide them.
 
 ## When you change something

@@ -238,3 +238,5 @@ Standard variables honored by the bootstrap:
 | `client_auth` | `TLS_CLIENT_AUTH` | `no-client-cert` | `request-client-cert`, `require-any-client-cert`, `verify-client-cert-if-given`, `require-and-verify-client-cert` (mTLS) |
 | `ca_cert_file` | `TLS_CA_CERT_FILE` | — | Required when client certificates are verified |
 | `cipher_suites` | `TLS_CIPHER_SUITES` | — | TLS ≤ 1.2 only; rejected together with `min_version: TLS13` |
+
+`tls` is a pointer section: with no `tls` key and no `*_TLS_*` variable it stays `nil` (TLS off). Once a file, env or flag sets any of its fields, the other fields start from the defaults above, so `min_version` and `client_auth` can be left out.
