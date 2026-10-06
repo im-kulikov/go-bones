@@ -210,11 +210,21 @@ func checkBudgets(t *testing.T, docs map[string]string) {
 			limit = maxIndexLines
 		}
 
-		if lines := strings.Count(text, "\n"); lines > limit {
+		if lines := lineCount(text); lines > limit {
 			t.Errorf("%s has %d lines, budget %d: split it or move details one level down",
 				name, lines, limit)
 		}
 	}
+}
+
+// lineCount counts lines as an editor shows them: the last one may lack "\n".
+func lineCount(text string) int {
+	n := strings.Count(text, "\n")
+	if text != "" && !strings.HasSuffix(text, "\n") {
+		n++
+	}
+
+	return n
 }
 
 // prose drops fenced code blocks and inline code, where `Get[T](env)` is Go,
@@ -313,4 +323,12 @@ func headingSlug(heading string) string {
 	}
 
 	return out.String()
+}
+
+func TestLineCount(t *testing.T) {
+	for text, want := range map[string]int{"": 0, "a\n": 1, "a\nb": 2, "a\nb\n": 2} {
+		if got := lineCount(text); got != want {
+			t.Errorf("lineCount(%q) = %d, want %d", text, got, want)
+		}
+	}
 }
