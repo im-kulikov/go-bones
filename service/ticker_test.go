@@ -85,7 +85,11 @@ func TestTicker_Options(t *testing.T) {
 	require.Equal(t, time.Minute, tk.next(), "no jitter")
 
 	WithTickerJitter(5)(tk)
-	require.InDelta(t, 1.0, tk.jitter, 0)
+	require.InDelta(t, maxJitter, tk.jitter, 0)
+
+	for range 100 {
+		require.GreaterOrEqual(t, tk.next(), 30*time.Second, "at least half an interval")
+	}
 
 	// NaN would make every interval negative and spin the timer.
 	WithTickerJitter(math.NaN())(tk)

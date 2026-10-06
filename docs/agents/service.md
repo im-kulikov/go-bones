@@ -63,13 +63,14 @@ User view: [Lifecycle](../lifecycle.md), [Getting started](../getting-started.md
   `ErrNilConstructor` before anything runs, so `app.Add` reports its file:line.
   `Build` appends to `Env` without a lock on purpose: components are built in
   order, concurrent builds would make `Get` results depend on timing.
-- `NewTicker` runs immediately, never overlaps runs, logs task errors and keeps
-  going, panics on a non-positive interval. `WithTickerJitter` clamps to
-  [0, 1] and turns NaN into 0: a NaN jitter makes every interval negative and
-  spins the timer. For the same reason `next` falls back to the plain interval
-  when the jittered one is not positive (it wraps past MaxInt64). The timer branch checks `ctx.Err()` first: when a tick and
-  the cancellation are ready together `select` picks at random, so without it
-  a task could run once after shutdown.
+- `NewTicker` runs immediately, never overlaps runs, logs task errors and
+  keeps going, panics on a non-positive interval. `WithTickerJitter` clamps to
+  [0, 0.5] (runs stay half an interval apart) and turns NaN into 0: a NaN
+  jitter makes every interval negative and spins the timer. For the same
+  reason `next` falls back to the plain interval when the jittered one is not
+  positive (it wraps past MaxInt64). The timer branch checks `ctx.Err()`
+  first: when a tick and the cancellation are ready together `select` picks at
+  random, so without it a task could run once after shutdown.
 - `WithLauncherHealthCheck` returns `checkedLauncher`, which implements
   `HealthChecker` and `health.Configurer`. Its options are cloned when stored
   and when handed out, like the shutdown hooks.

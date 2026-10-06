@@ -26,15 +26,20 @@ func WithTickerTimeout(d time.Duration) TickerOption {
 
 // WithTickerJitter spreads runs by ±fraction of the interval (0.1 is ±10%), so
 // replicas started together do not hit a dependency at the same moment. The
-// fraction is clamped to [0, 1]; NaN means no jitter.
+// fraction is clamped to [0, 0.5], so two runs are at least half an interval
+// apart; NaN means no jitter.
 func WithTickerJitter(fraction float64) TickerOption {
 	return func(t *ticker) {
 		t.jitter = 0
 		if fraction > 0 { // false for NaN, which max would pass through
-			t.jitter = min(fraction, 1)
+			t.jitter = min(fraction, maxJitter)
 		}
 	}
 }
+
+// maxJitter keeps the interval in [every/2, 3*every/2]: above it a run could
+// follow the previous one almost at once, the burst jitter is meant to avoid.
+const maxJitter = 0.5
 
 // WithTickerLogger sets the logger for failed runs; logger.Default() otherwise.
 // Nil is ignored.
