@@ -42,6 +42,7 @@ func Default() *Logger {
 //   - `json`: JSON-formatted logs (default).
 //   - `text`: slog key=value text logs.
 //   - `console`: colored, human-readable lines for local runs.
+//   - `journal`: lines with a syslog priority prefix for journald (systemd).
 //
 // Supported levels (see slog.Level): DEBUG, INFO, WARN, ERROR
 //
@@ -81,6 +82,8 @@ func formatFor(name string) HandlerConstructor {
 		return func(w io.Writer, o *HandlerOptions) Handler { return slog.NewTextHandler(w, o) }
 	case "console":
 		return NewConsoleHandler
+	case "journal":
+		return newJournalHandler
 	case "", "json":
 	default:
 		Warn("could not parse logger.format", String("format", name))

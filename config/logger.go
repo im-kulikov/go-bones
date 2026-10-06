@@ -19,7 +19,7 @@ type Logger struct {
 	OpenTracingEnabled bool     `env:"OPEN_TRACING_ENABLED" yaml:"open_tracing" json:"open_tracing" toml:"open_tracing" default:"false"`
 	Secrets            []string `env:"SECRETS"              yaml:"secrets"      json:"secrets"      toml:"secrets"`
 	Level              string   `env:"LEVEL"                yaml:"level"        json:"level"        toml:"level"        default:"info"  usage:"Allows to set level for default logger"`
-	Format             string   `env:"FORMAT"               yaml:"format"       json:"format"       toml:"format"       default:"json"  usage:"Allows to set format for default logger: json, text or console"`
+	Format             string   `env:"FORMAT"               yaml:"format"       json:"format"       toml:"format"       default:"json"  usage:"Allows to set format for default logger: json, text, console or journal"`
 	AddSource          bool     `env:"ADD_SOURCE"           yaml:"add_source"   json:"add_source"   toml:"add_source"`
 	AddAppInfo         bool     `env:"ADD_APP_INFO"         yaml:"add_app_info" json:"add_app_info" toml:"add_app_info"`
 }

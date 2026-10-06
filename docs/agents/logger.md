@@ -19,7 +19,7 @@ User view: [Observability › Logging](../observability.md#logging).
 | `logger/context.go` | `AddContextAttrs` and the transformer that merges them |
 | `logger/tracing.go` | `openTracingTransform`: `trace` group, span event, error status |
 | `logger/otel.go` | OTel log bridge (`SetOpenTelemetryBridge`), slog → OTel value mapping |
-| `logger/console.go` | `NewConsoleHandler` (`LOGGER_FORMAT=console`, honors `NO_COLOR`) |
+| `logger/console.go` | `NewConsoleHandler` (`LOGGER_FORMAT=console`, honors `NO_COLOR`), `newJournalHandler` (`LOGGER_FORMAT=journal`) |
 | `logger/testing.go` | `ForTests`, `TestLoggerWriteToTB`, `TestLoggerWriter`, `TestLoggerSecrets`, `NewSyncBuffer` |
 
 ## Pipeline
@@ -41,7 +41,8 @@ step. Full contract: `.github/instructions/logger.instructions.md`.
   [architecture](architecture.md#process-wide-state)). Library code takes an
   explicit `*logger.Logger`; package-level helpers are for apps.
 - `Init` never fails: a bad level or format logs a warning and falls back
-  (level `info`, format `json`). Formats: `json` (default), `text`, `console`.
+  (level `info`, format `json`). Formats: `json` (default), `text`, `console`,
+  `journal`.
 - The OTel bridge is toggled only by `tracer` (on with `send_logs`, off on
   shutdown). When it is on, `openTracingTransform` skips span events so a line
   is not shipped twice.
@@ -51,6 +52,10 @@ step. Full contract: `.github/instructions/logger.instructions.md`.
   printed; the inner `TextHandler` drops them so they are not printed twice.
   Line breaks in the message are escaped (`oneLine`): one record, one line;
   attribute values are already quoted by the `TextHandler`.
+- `journal` is the console handler with `journal` set: no colors, no time or
+  level, the `<N>` priority glued to the line with no space (journald would
+  keep the space in MESSAGE). Never picked from `JOURNAL_STREAM`: that would
+  change the output of services already under systemd.
 
 ## Tests
 

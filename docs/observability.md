@@ -37,6 +37,8 @@ logger:
 
 **Output**: `LOGGER_FORMAT` is `json` by default — what log collectors expect in production. Use `console` for a colored, human-readable line locally (`NO_COLOR` turns colors off) or `text` for plain `key=value`.
 
+Under systemd, set `LOGGER_FORMAT=journal` (`Environment=LOGGER_FORMAT=journal` in the unit): each line starts with the syslog priority (`<6>` info, `<4>` warning, …) instead of time and level, journald stores it as the entry priority, and `journalctl -p warning` filters by it. The format is never chosen automatically: `JOURNAL_STREAM` is set for any service under systemd, including those whose JSON is shipped on by a collector.
+
 ## OpenTelemetry
 
 ```go
