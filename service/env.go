@@ -22,6 +22,10 @@ const ErrDependency bones.Error = "unresolved dependency"
 // dependency. A nil interface means a disabled component and is not an error.
 const ErrNilComponent bones.Error = "constructor returned a typed nil"
 
+// ErrNilConstructor is wrapped by the error Build returns for a nil
+// constructor, instead of a nil pointer panic without the call site.
+const ErrNilConstructor bones.Error = "nil constructor"
+
 // Env is what an application gives every component constructor.
 //
 // Components get their dependencies from Env with Get, by type, from the values
@@ -102,6 +106,12 @@ func Get[T any](env Env) T {
 // component) is not added; a typed nil is an error wrapping ErrNilComponent.
 // The error names the constructor.
 func Build[C, T any](env Env, cfg C, ctor Constructor[C, T]) (_ T, err error) {
+	if ctor == nil {
+		var zero T
+
+		return zero, fmt.Errorf("%w for %s", ErrNilConstructor, reflect.TypeFor[T]())
+	}
+
 	name := runtime.FuncForPC(reflect.ValueOf(ctor).Pointer()).Name()
 
 	defer func() {

@@ -59,7 +59,8 @@ User view: [Lifecycle](../lifecycle.md), [Getting started](../getting-started.md
   called directly (not via `Build`) panics on a missing dependency. Exactly one
   value in `Env` must be assignable to `T`. A nil interface result means a
   disabled component and is not stored; a typed nil (`(*T)(nil)`) is an error
-  wrapping `ErrNilComponent` (`typedNil`).
+  wrapping `ErrNilComponent` (`typedNil`). A nil constructor fails with
+  `ErrNilConstructor` before anything runs, so `app.Add` reports its file:line.
 - `NewTicker` runs immediately, never overlaps runs, logs task errors and keeps
   going, panics on a non-positive interval. `WithTickerJitter` clamps to
   [0, 1] and turns NaN into 0: a NaN jitter makes every interval negative and

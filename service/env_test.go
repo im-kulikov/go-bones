@@ -64,6 +64,12 @@ func TestBuild_ConstructorError(t *testing.T) {
 	require.ErrorIs(t, err, ErrDependency, "a failed constructor provides nothing")
 }
 
+func TestBuild_NilConstructor(t *testing.T) {
+	_, err := Build[envConfig, *envRepo](TestEnv(t), envConfig{}, nil)
+	require.ErrorIs(t, err, ErrNilConstructor)
+	require.ErrorContains(t, err, "*service.envRepo")
+}
+
 func TestBuild_NilResultIsNotAdded(t *testing.T) {
 	env := TestEnv(t)
 
