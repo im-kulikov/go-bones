@@ -243,10 +243,16 @@ func (h *serverOptions) listen(top context.Context) error {
 		// Shutdown gives up at the deadline and leaves active connections open;
 		// close them, like the hard Stop after GracefulStop in network/grpc.
 		if errStop := h.Shutdown(ctx); errStop != nil {
+			// Only the deadline means connections are still open; any other
+			// error (closing a listener) comes after they were drained.
+			msg := "graceful shutdown failed"
+			if errors.Is(errStop, context.DeadlineExceeded) {
+				msg = "graceful shutdown timed out, closing active connections"
+			}
+
 			errClose := h.Close()
 			errStop = errors.Join(ErrHTTPShutdownServer, errStop, context.Cause(ctx), errClose)
-			h.ErrorContext(ctx, "graceful shutdown timed out, closing active connections",
-				logger.String("name", h.name), logger.Err(errStop))
+			h.ErrorContext(ctx, msg, logger.String("name", h.name), logger.Err(errStop))
 		}
 	})()
 

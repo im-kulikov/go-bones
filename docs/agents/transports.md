@@ -27,7 +27,9 @@ User view: [HTTP & gRPC](../transports.md), [Ops server](../ops.md),
   works), serves, and shuts down gracefully within `Network.ShutdownTimeout`
   when the ctx is canceled. `ErrServerClosed`/`ErrServerStopped` are clean.
 - HTTP: `Shutdown(ctx)`, and `Close()` when it hits the deadline, so active
-  connections are force-closed like gRPC's hard `Stop`. Handlers still running
+  connections are force-closed like gRPC's hard `Stop`. Only
+  `DeadlineExceeded` is logged as "timed out"; another `Shutdown` error (a
+  listener `Close`) comes after the drain and is logged as "failed". Handlers still running
   see write errors; their goroutines are not killed.
 - gRPC: `GracefulStop` with a hard `Stop` after the timeout (force-close). The defer order
   in `listen` is load-bearing (see the comment there) — do not reorder.
