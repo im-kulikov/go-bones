@@ -42,7 +42,7 @@ No graph, no reflection, no lifetimes. `app.Add` runs constructors in the order 
 ## My pod never becomes ready
 
 ```bash
-kubectl port-forward pod/orders-xyz 8090
+kubectl port-forward pod/orders-xyz 8090 & sleep 1   # runs in the background; stop it: kill %1
 curl 'localhost:8090/readyz?verbose'
 ```
 

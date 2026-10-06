@@ -21,7 +21,8 @@ The ops port must **never** be exposed publicly: pprof can stall the process and
 
 ```bash
 OPS_PROFILE_ENABLED=false OPS_EXP_VARS_ENABLED=false ./orders
-kubectl port-forward pod/orders-xyz 8090 && go tool pprof -http=: localhost:8090/debug/pprof/heap
+kubectl port-forward pod/orders-xyz 8090 & sleep 1   # runs in the background; stop it: kill %1
+go tool pprof -http=: localhost:8090/debug/pprof/heap
 ```
 
 ## Metrics
