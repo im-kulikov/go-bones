@@ -135,7 +135,7 @@ func Run() {
 	err := service.RunContext(a.env.Context, a.env.Logger,
 		service.WithHealth(a.health),
 		service.WithDrainDelay(a.base.Health.DrainDelay),
-		service.WithShutdownLast(a.ops),
+		service.WithShutdownLast(a.ops), // only marks it, WithService starts it
 		service.WithService(a.list...),
 		service.WithService(a.ops))
 	if err != nil {

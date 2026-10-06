@@ -3,7 +3,10 @@ package app
 import (
 	"context"
 	"errors"
+	"net"
+	"net/http"
 	"os"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -124,6 +127,42 @@ func TestApp_InitAddRun(t *testing.T) {
 	require.NotNil(t, std.ops)
 
 	require.Equal(t, -1, exitOf(t, Run), "a clean shutdown does not exit")
+}
+
+// Run starts the OPS server: WithShutdownLast only marks it to stop last,
+// WithService is what starts it.
+func TestApp_RunServesOPS(t *testing.T) {
+	setup(t)
+
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	addr := lis.Addr().String()
+	require.NoError(t, lis.Close())
+	t.Setenv("OPS_ADDRESS", addr)
+
+	cfg := initApp()
+
+	var status atomic.Int32
+
+	Add(cfg.API, func(apiConfig, service.Env) (service.Service, error) {
+		return service.NewLauncher("probe", func(ctx context.Context) error {
+			// Returning stops the application, also when OPS never answers.
+			for deadline := time.Now().Add(5 * time.Second); ctx.Err() == nil && time.Now().Before(deadline); {
+				if res, err := http.Get("http://" + addr + "/livez"); err == nil {
+					status.Store(int32(res.StatusCode))
+
+					return res.Body.Close()
+				}
+
+				time.Sleep(10 * time.Millisecond)
+			}
+
+			return nil
+		}), nil
+	})
+
+	require.Equal(t, -1, exitOf(t, Run))
+	require.Equal(t, int32(http.StatusOK), status.Load(), "OPS answered /livez during Run")
 }
 
 // TestApp_SignalBeforeRun: a signal received while components are built cancels
