@@ -41,6 +41,8 @@ func Default() *Logger {
 // Supported formats:
 //   - `json`: JSON-formatted logs.
 //   - `text`: human-readable text logs (default).
+//   - `journald`: records are written to journald over its native protocol, so
+//     that every attribute becomes a field of the journal entry.
 //
 // Supported levels (see slog.Level): DEBUG, INFO, WARN, ERROR
 //
@@ -62,6 +64,8 @@ func optionsFromConfig(cfg config.Logger, opts []Option) iter.Seq[Option] {
 		switch cfg.Format {
 		case "json":
 			format = func(w io.Writer, o *HandlerOptions) Handler { return slog.NewJSONHandler(w, o) }
+		case "journald":
+			format = NewJournalHandler
 		case "text":
 			// already set
 		default:
