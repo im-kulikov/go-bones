@@ -12,12 +12,12 @@ import (
 
 // ANSI colors of the console format.
 const (
-	colorReset = "\x1b[0m"
-	colorDim   = "\x1b[90m"
-	colorRed   = "\x1b[31m"
-	colorGreen = "\x1b[32m"
-	colorYelow = "\x1b[33m"
-	colorBlue  = "\x1b[34m"
+	colorReset  = "\x1b[0m"
+	colorDim    = "\x1b[90m"
+	colorRed    = "\x1b[31m"
+	colorGreen  = "\x1b[32m"
+	colorYellow = "\x1b[33m"
+	colorBlue   = "\x1b[34m"
 )
 
 // consoleHandler writes one human-readable line per record for development:
@@ -233,7 +233,7 @@ func levelStyle(l Level) (color, name string) {
 	case l < slog.LevelWarn:
 		return colorGreen, "INF"
 	case l < slog.LevelError:
-		return colorYelow, "WRN"
+		return colorYellow, "WRN"
 	default:
 		return colorRed, "ERR"
 	}

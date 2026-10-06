@@ -36,7 +36,7 @@ func TestConsoleHandler(t *testing.T) {
 		lines[0],
 	)
 	require.Contains(t, lines[1], colorGreen+"INF"+colorReset)
-	require.Contains(t, lines[2], colorYelow+"WRN"+colorReset)
+	require.Contains(t, lines[2], colorYellow+"WRN"+colorReset)
 	require.Contains(t, lines[3], colorRed+"ERR"+colorReset)
 }
 
