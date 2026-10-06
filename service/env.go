@@ -105,6 +105,9 @@ func Get[T any](env Env) T {
 // constructors built after it can Get it. A nil interface result (a disabled
 // component) is not added; a typed nil is an error wrapping ErrNilComponent.
 // The error names the constructor.
+//
+// Build components one after another: what a constructor can Get depends on
+// the order, so Build, and Get during it, are not safe for concurrent use.
 func Build[C, T any](env Env, cfg C, ctor Constructor[C, T]) (_ T, err error) {
 	if ctor == nil {
 		var zero T
