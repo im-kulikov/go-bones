@@ -114,5 +114,11 @@ func (t *ticker) next() time.Duration {
 	//nolint:gosec // jitter does not need a cryptographic source.
 	spread := (rand.Float64()*2 - 1) * t.jitter * float64(t.every)
 
-	return t.every + time.Duration(spread)
+	// Near MaxInt64 a positive spread wraps the sum negative (and the float may
+	// round past the int64 range); a non-positive delay would spin the timer.
+	if next := t.every + time.Duration(spread); next > 0 {
+		return next
+	}
+
+	return t.every
 }

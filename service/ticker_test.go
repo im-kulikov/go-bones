@@ -145,3 +145,11 @@ func TestNewTicker_NoRunAfterCancel(t *testing.T) {
 
 	require.Zero(t, runs.Load())
 }
+
+func TestTicker_JitterNeverOverflows(t *testing.T) {
+	huge := &ticker{every: math.MaxInt64 - time.Second, jitter: 1}
+
+	for range 1000 {
+		require.Positive(t, huge.next())
+	}
+}
