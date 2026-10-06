@@ -250,8 +250,9 @@ func classify(err error, timeout time.Duration) (string, error) {
 
 // record applies a new outcome to r using its thresholds. A negative took marks
 // a push update, which is not observed in the duration histogram. The first outcome
-// decides the status immediately, afterwards FailureThreshold consecutive
-// failures (or SuccessThreshold successes) are needed to flip it.
+// decides the status immediately (except a failure within StartPeriod, which
+// keeps it unknown), afterwards FailureThreshold consecutive failures (or
+// SuccessThreshold successes) are needed to flip it.
 func (m *Monitor) record(r *registration, err error, kind string, took time.Duration) {
 	m.metrics.observe(r.name, kind, took)
 
@@ -280,13 +281,20 @@ func (m *Monitor) record(r *registration, err error, kind string, took time.Dura
 		next.ConsecutiveFailures++
 		next.ConsecutiveSuccesses = 0
 
-		if prev.Status != StatusFailing &&
+		if prev.Status != StatusFailing && !m.starting(prev, now) &&
 			(prev.Status == StatusUnknown || next.ConsecutiveFailures >= r.failure) {
 			next.Status = StatusFailing
 		}
 	}
 
 	m.applyLocked(r, next, now)
+}
+
+// starting reports whether a check without a status yet is still within
+// StartPeriod: a failure then keeps it unknown, its service may not be started.
+// Must be called with m.mu held.
+func (m *Monitor) starting(prev Result, now time.Time) bool {
+	return prev.Status == StatusUnknown && now.Sub(m.startedAt) < m.cfg.StartPeriod
 }
 
 // applyLocked stores next as the result of r, emits/logs a transition and

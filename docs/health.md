@@ -234,6 +234,7 @@ Logging: only transitions are logged (`→ failing` at warn, error for liveness;
 ## Monitor behavior in detail
 
 - First run right after start, then every `initial_interval` until the first success, then every `interval` ±10% jitter.
+- Services start in parallel with the monitor, so first runs often fail. With `start_period` set, a failure before the first success keeps the check `unknown` (readiness stays off, nothing is logged) until the period ends; after that the next failure is logged as usual.
 - A run exceeding `timeout` is recorded as `timeout` immediately. At most one call per check is in flight; ticks during a hung call are skipped (and counted in `skipped_total`).
 - Errors, timeouts and panics are failures; `failure_threshold` / `success_threshold` prevent flapping.
 - A result older than `stale_after` (or `WithTTL` for push statuses) is `stale` and counts as failing. A global `stale_after` is raised per check to at least interval + jitter + timeout.

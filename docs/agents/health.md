@@ -38,7 +38,9 @@ every readiness check up; `Overall` adds `degraded` for informational failures.
   recorded at the deadline without waiting for the checker; a panic becomes
   `ErrPanic`; cancellations during shutdown are not recorded.
 - The first outcome sets the status at once; later flips need
-  `FailureThreshold`/`SuccessThreshold` consecutive outcomes.
+  `FailureThreshold`/`SuccessThreshold` consecutive outcomes. Exception: a
+  failure within `StartPeriod` after `Start` keeps an unknown check unknown
+  (`health/check.go` `starting`).
 - Unknown is neither up nor down: an unknown readiness check keeps `Ready`
   false, an unknown liveness check keeps `Live` true.
 - `Drain` is permanent and idempotent; `Stop` drains first.

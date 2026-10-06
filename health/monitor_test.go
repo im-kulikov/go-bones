@@ -594,6 +594,39 @@ func TestLogRepeat(t *testing.T) {
 	})
 }
 
+// A check failing while its service is still starting stays unknown (not
+// ready, no WARN) until StartPeriod is over.
+func TestStartPeriod(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		buf := logger.NewSyncBuffer()
+		cfg := testConfig()
+		cfg.StartPeriod = 5 * time.Second
+		m := New(cfg, logger.ForTests(logger.TestLoggerWriter(buf)))
+		m.jitter = func(d time.Duration) time.Duration { return d }
+
+		c := new(counter)
+		c.set(errDown)
+		require.NoError(t, m.Register("db", c))
+
+		stop := start(t, m)
+		defer stop()
+
+		time.Sleep(4 * time.Second)
+		synctest.Wait()
+
+		res := m.Snapshot().Checks["db"]
+		require.Equal(t, StatusUnknown, res.Status)
+		require.ErrorIs(t, res.Err, errDown)
+		require.False(t, m.Snapshot().Ready)
+		require.NotContains(t, buf.String(), "health check failing")
+
+		time.Sleep(2 * time.Second)
+		synctest.Wait()
+		require.Equal(t, StatusFailing, m.Snapshot().Checks["db"].Status)
+		require.Contains(t, buf.String(), "health check failing")
+	})
+}
+
 func TestDefaultJitter(t *testing.T) {
 	for range 100 {
 		v := defaultJitter(10 * time.Second)

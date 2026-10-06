@@ -13,6 +13,10 @@ type Health struct {
 	Interval time.Duration `yaml:"interval" env:"INTERVAL" toml:"interval" json:"interval" default:"10s"`
 	// InitialInterval is the period used until a check reports its first success.
 	InitialInterval time.Duration `yaml:"initial_interval" env:"INITIAL_INTERVAL" toml:"initial_interval" json:"initial_interval" default:"1s"`
+	// StartPeriod is the time after the monitor starts during which a failing check
+	// that has not passed yet stays unknown (not ready, not logged as failing),
+	// so services still starting do not log failures. 0 turns it off.
+	StartPeriod time.Duration `yaml:"start_period" env:"START_PERIOD" toml:"start_period" json:"start_period"`
 	// Timeout is the deadline of a single Check call.
 	Timeout time.Duration `yaml:"timeout" env:"TIMEOUT" toml:"timeout" json:"timeout" default:"2s"`
 	// MinInterval is the minimal distance between two runs requested by Trigger.
