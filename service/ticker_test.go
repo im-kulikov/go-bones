@@ -111,3 +111,37 @@ func TestNewTicker_NonPositiveInterval(t *testing.T) {
 		NewTicker("bad", 0, func(context.Context) error { return nil })
 	})
 }
+
+// lateCancel passes the launcher's own Err check once and is canceled after
+// that, so the first tick and ctx.Done are both ready in the ticker's select.
+type lateCancel struct {
+	context.Context
+
+	checked atomic.Bool
+}
+
+func (c *lateCancel) Err() error {
+	if c.checked.CompareAndSwap(false, true) {
+		return nil
+	}
+
+	return c.Context.Err()
+}
+
+func TestNewTicker_NoRunAfterCancel(t *testing.T) {
+	canceled, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	var runs atomic.Int32
+
+	for range 100 {
+		svc := NewTicker("late", time.Hour, func(context.Context) error {
+			runs.Add(1)
+
+			return nil
+		})
+		require.NoError(t, svc.Start(&lateCancel{Context: canceled}))
+	}
+
+	require.Zero(t, runs.Load())
+}

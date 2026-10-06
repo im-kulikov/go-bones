@@ -63,7 +63,9 @@ User view: [Lifecycle](../lifecycle.md), [Getting started](../getting-started.md
 - `NewTicker` runs immediately, never overlaps runs, logs task errors and keeps
   going, panics on a non-positive interval. `WithTickerJitter` clamps to
   [0, 1] and turns NaN into 0: a NaN jitter makes every interval negative and
-  spins the timer.
+  spins the timer. The timer branch checks `ctx.Err()` first: when a tick and
+  the cancellation are ready together `select` picks at random, so without it
+  a task could run once after shutdown.
 - `WithLauncherHealthCheck` returns `checkedLauncher`, which implements
   `HealthChecker` and `health.Configurer`. Its options are cloned when stored
   and when handed out, like the shutdown hooks.

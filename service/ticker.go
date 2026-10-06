@@ -83,6 +83,10 @@ func NewTicker(
 			case <-ctx.Done():
 				return nil
 			case <-timer.C:
+				if ctx.Err() != nil { // select picks at random when both are ready
+					return nil
+				}
+
 				t.run(ctx, log, task)
 				timer.Reset(t.next())
 			}
