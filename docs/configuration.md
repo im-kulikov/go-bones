@@ -182,7 +182,7 @@ Defaults for every check; override per check with `health.WithInterval`, `WithTi
 |---|---|---|---|
 | `interval` | `HEALTH_INTERVAL` | `10s` | Poll period once a check has passed |
 | `initial_interval` | `HEALTH_INITIAL_INTERVAL` | `1s` | Poll period until the first success (services start in parallel, first checks often fail) |
-| `start_period` | `HEALTH_START_PERIOD` | `0` (off) | After start, a check that has not passed yet stays `unknown` on failure: not ready, but not logged as failing. Like Docker's `start_period`; useful under systemd, where nothing else waits for a service to start |
+| `start_period` | `HEALTH_START_PERIOD` | `0` (off) | After start, a polled check that has not passed yet stays `unknown` on failure: not ready, but not logged as failing. Like Docker's `start_period`; useful under systemd, where nothing else waits for a service to start |
 | `timeout` | `HEALTH_TIMEOUT` | `2s` | Deadline of one `Check` call (a cold TLS handshake often takes more than 1s) |
 | `min_interval` | `HEALTH_MIN_INTERVAL` | `1s` | Rate limit for `Trigger` |
 | `stale_after` | `HEALTH_STALE_AFTER` | `0` (= `2×interval + timeout` per check) | Result older than this counts as failing. Never shorter than a check's interval + 10% jitter + timeout, so a small global value cannot make slow checks flap |
