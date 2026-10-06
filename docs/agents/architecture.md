@@ -120,7 +120,7 @@ parallel. Prefer a struct field seam over a new global.
 | `--config`, `--help`, `--print-config` | gonfig flags embedded in `config.Base` (`config/alias.go`) |
 | version from VCS without ldflags | `config/config.go` `buildVersion` |
 | secret masking in logs | `logger/secrets.go`, `logger/handlers.go` `redactAttrs` |
-| log formats `json`/`text`/`console`/`journal`, your own via `RegisterFormat` | `logger/default.go` `formatFor`, `logger/console.go` |
+| log formats `json`/`text`/`console`, your own via `RegisterFormat` (journald: examples) | `logger/default.go` `formatFor`, `logger/console.go`, `logger/example_journal_test.go` |
 | `trace_id`/`span_id` in log lines | `logger/tracing.go` (only with `logger.open_tracing`) |
 | OTLP logs/metrics/traces | `tracer/tracer.go`, `logger/otel.go` |
 | `/metrics`, pprof, expvar, `/version` ([ops](../ops.md)) | `network/http/ops.go` |

@@ -182,6 +182,6 @@ func TestRegisterFormat(t *testing.T) {
 	require.True(t, built, "a registered format is picked by name")
 
 	require.Panics(t, func() { RegisterFormat("test-registered", ctor) }, "twice")
-	require.Panics(t, func() { RegisterFormat("journal", ctor) }, "built-in")
+	require.Panics(t, func() { RegisterFormat("console", ctor) }, "built-in")
 	require.Panics(t, func() { RegisterFormat("test-nil", nil) }, "nil")
 }

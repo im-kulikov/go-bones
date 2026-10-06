@@ -204,50 +204,27 @@ func TestConsoleHandler_OneLinePerRecord(t *testing.T) {
 	require.Equal(t, `INF user\nINF forged\r`+"\n", buf.String())
 }
 
-// The journal format prints one line per record with the sd-daemon(3)
-// priority instead of time and level, never colored.
-func TestJournalHandler(t *testing.T) {
-	t.Setenv("NO_COLOR", "")
-
-	buf := new(bytes.Buffer)
-	log := slog.New(formatFor("journal")(buf, &HandlerOptions{Level: slog.LevelDebug}))
-
-	log.Debug("debug")
-	log.With("app", "x").Info("info", "k", "v")
-	log.Warn("two\nlines", "err", "a\nb")
-	log.Error("error")
-	log.Log(t.Context(), slog.LevelError+4, "fatal")
-
-	require.Equal(t, "<7>debug\n"+
-		"<6>info app=x k=v\n"+
-		`<4>two\nlines err="a\nb"`+"\n"+
-		"<3>error\n"+
-		"<3>fatal\n", buf.String())
-}
-
 // Only the built-in time, level and msg are dropped from the inner line: user
 // attributes with the same keys are printed, also when bound with With from
 // another goroutine (run with -race).
 func TestConsoleHandler_UserAttrsNamedLikeBuiltins(t *testing.T) {
-	for _, format := range []string{"console", "journal"} {
-		buf := new(bytes.Buffer)
-		log := slog.New(formatFor(format)(buf, &HandlerOptions{AddSource: true}))
+	buf := new(bytes.Buffer)
+	log := slog.New(NewConsoleHandler(buf, &HandlerOptions{AddSource: true}))
 
-		done := make(chan struct{})
-		go func() {
-			defer close(done)
-
-			for range 50 {
-				log.With("level", "l").Info("x", "msg", "m", "time", "t")
-			}
-		}()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
 
 		for range 50 {
-			log.Info("y")
+			log.With("level", "l").Info("x", "msg", "m", "time", "t")
 		}
-		<-done
+	}()
 
-		require.Contains(t, buf.String(), " level=l msg=m time=t\n", format)
-		require.Contains(t, buf.String(), "source=", format)
+	for range 50 {
+		log.Info("y")
 	}
+	<-done
+
+	require.Contains(t, buf.String(), " level=l msg=m time=t\n")
+	require.Contains(t, buf.String(), "source=")
 }

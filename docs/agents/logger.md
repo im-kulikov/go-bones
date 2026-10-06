@@ -19,7 +19,7 @@ User view: [Observability › Logging](../observability.md#logging).
 | `logger/context.go` | `AddContextAttrs` and the transformer that merges them |
 | `logger/tracing.go` | `openTracingTransform`: `trace` group, span event, error status |
 | `logger/otel.go` | OTel log bridge (`SetOpenTelemetryBridge`), slog → OTel value mapping |
-| `logger/console.go` | `NewConsoleHandler` (`LOGGER_FORMAT=console`, honors `NO_COLOR`), `newJournalHandler` (`LOGGER_FORMAT=journal`) |
+| `logger/console.go` | `NewConsoleHandler` (`LOGGER_FORMAT=console`, honors `NO_COLOR`) |
 | `logger/testing.go` | `ForTests`, `TestLoggerWriteToTB`, `TestLoggerWriter`, `TestLoggerSecrets`, `NewSyncBuffer` |
 
 ## Pipeline
@@ -41,8 +41,7 @@ step. Full contract: `.github/instructions/logger.instructions.md`.
   [architecture](architecture.md#process-wide-state)). Library code takes an
   explicit `*logger.Logger`; package-level helpers are for apps.
 - `Init` never fails: a bad level or format logs a warning and falls back
-  (level `info`, format `json`). Formats: `json` (default), `text`, `console`,
-  `journal`.
+  (level `info`, format `json`). Formats: `json` (default), `text`, `console`.
 - The OTel bridge is toggled only by `tracer` (on with `send_logs`, off on
   shutdown). When it is on, `openTracingTransform` skips span events so a line
   is not shipped twice.
@@ -53,23 +52,21 @@ step. Full contract: `.github/instructions/logger.instructions.md`.
   It drops by position, not key: slog passes time, level, source, msg before
   the record attributes, so the `builtins` flag (set in `Handle`, cleared at
   msg) keeps user attributes keyed `msg`/`time`/`level`. `WithAttrs` takes
-  `mu` because the inner handler runs `ReplaceAttr` there too.
-- So `console` and `journal` render under `mu` (shared buffer and `builtins`):
-  about 1 µs per record whatever the number of goroutines, where text and json
-  scale with cores. Fine for local runs and systemd volumes; removing the lock
-  means formatting attributes without the inner `TextHandler`.
-  Line breaks in the message are escaped (`oneLine`): one record, one line;
-  attribute values are already quoted by the `TextHandler`.
+  `mu` because the inner handler runs `ReplaceAttr` there too. Line breaks in
+  the message are escaped (`oneLine`): one record, one line; attribute values
+  are already quoted by the `TextHandler`.
+- So `console` renders under `mu` (shared buffer and `builtins`): about 1 µs
+  per record whatever the number of goroutines, where text and json scale
+  with cores. Fine for local runs; removing the lock means formatting
+  attributes without the inner `TextHandler`.
 - Formats go-bones does not ship are registered by the service with
   `RegisterFormat` before `Init` (a `sync.Map`; built-in names, duplicates and
   a nil constructor panic). The registered handler is the final one behind
-  the pipeline, like the built-ins. Do not add more built-in formats for one
-  user: point them to `RegisterFormat` (journald fields: systemd/slog-journal,
-  example in [Observability](../observability.md#logging)).
-- `journal` is the console handler with `journal` set: no colors, no time or
-  level, the `<N>` priority glued to the line with no space (journald would
-  keep the space in MESSAGE). Never picked from `JOURNAL_STREAM`: that would
-  change the output of services already under systemd.
+  the pipeline, like the built-ins. Do not add built-in formats for one
+  user: point them to `RegisterFormat`. A built-in `journal` (the `<N>`
+  priority prefix journald reads from stdout) was dropped for this reason; it
+  lives on as `logger/example_journal_test.go`, and journald fields go through
+  systemd/slog-journal ([Observability](../observability.md#logging)).
 
 ## Tests
 

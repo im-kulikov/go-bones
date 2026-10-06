@@ -109,7 +109,7 @@ Want to wire everything yourself? Every piece is a regular package — see [Manu
 | 📡 | **gRPC health for free** | Standard `grpc.health.v1`, driven by the same monitor. [→ Health](docs/health.md#grpc-health) |
 | 🔭 | **OpenTelemetry by the book** | Standard `OTEL_*` env vars, traces + metrics + logs over OTLP, `trace_id`/`span_id` in log lines. [→ Observability](docs/observability.md) |
 | 📊 | **Ops server** | `/metrics` with full Go runtime metrics, `pprof`, `expvar` and opt-in `/version` (`OPS_VERSION_ENABLED=true`) on a separate private port. [→ Ops](docs/ops.md) |
-| 🔐 | **Safe logging** | `log/slog` under the hood: JSON by default, a colored `console` format for local runs, `journal` for systemd, your own via `logger.RegisterFormat`, secret masking by key, request-scoped attributes. [→ Observability](docs/observability.md#logging) |
+| 🔐 | **Safe logging** | `log/slog` under the hood: JSON by default, a colored `console` format for local runs, your own (journald, …) via `logger.RegisterFormat`, secret masking by key, request-scoped attributes. [→ Observability](docs/observability.md#logging) |
 | ⚙️ | **One config, many sources** | Defaults → YAML/JSON/TOML → env → flags. `--help` lists every flag and variable, `--print-config` prints the loaded config with secrets hidden. [→ Configuration](docs/configuration.md) |
 | 🧩 | **Assembly without a framework** | `app.Add(cfg.Section, pkg.New)` per component, dependencies by type with `service.Get`, a clear error with `file:line` when something is missing. [→ Getting started](docs/getting-started.md) |
 | 🧪 | **Testable** | Test logger, `service.TestEnv(t, fakes...)` to build one component with fake dependencies, `config.Defaults[T]()` for configs. [→ Testing](docs/testing.md) |

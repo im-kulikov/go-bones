@@ -37,7 +37,6 @@ type consoleHandler struct {
 	// passed msg to ReplaceAttr. Shared by clones, guarded by mu.
 	builtins *bool
 	color    bool
-	journal  bool
 }
 
 // NewConsoleHandler returns the handler behind LOGGER_FORMAT=console: colored,
@@ -90,21 +89,6 @@ func NewConsoleHandler(w io.Writer, opts *HandlerOptions) Handler {
 	}
 }
 
-// newJournalHandler is behind LOGGER_FORMAT=journal, for stdout read by
-// journald (systemd StandardOutput=journal): the console line without colors,
-// time and level, prefixed with the sd-daemon(3) priority, which journald
-// strips and stores as PRIORITY, so journalctl -p filters by level:
-//
-//	<6>[api] request handled method=GET status=200
-//
-// ReplaceAttr gets the message but not the time and level, which are not printed.
-func newJournalHandler(w io.Writer, opts *HandlerOptions) Handler {
-	h := NewConsoleHandler(w, opts).(*consoleHandler)
-	h.color, h.journal = false, true
-
-	return h
-}
-
 func (h *consoleHandler) Enabled(ctx context.Context, level Level) bool {
 	return h.attrs.Enabled(ctx, level)
 }
@@ -137,29 +121,6 @@ func (h *consoleHandler) Handle(ctx context.Context, r Record) error {
 	}
 
 	parts := make([]string, 0, 4)
-	if !h.journal { // journald stamps the time and takes the level from the prefix
-		parts = h.timeAndLevel(parts, r)
-	}
-
-	if v, ok := h.builtin(slog.String(slog.MessageKey, r.Message)); ok {
-		parts = append(parts, oneLine(v.String()))
-	}
-
-	if attrs := strings.TrimSuffix(h.buf.String(), "\n"); attrs != "" {
-		parts = append(parts, attrs)
-	}
-
-	line := strings.Join(parts, " ")
-	if h.journal {
-		line = journalPriority(r.Level) + line
-	}
-
-	_, err := io.WriteString(h.out, line+"\n")
-
-	return err
-}
-
-func (h *consoleHandler) timeAndLevel(parts []string, r Record) []string {
 	if !r.Time.IsZero() { // a zero time is omitted before ReplaceAttr, as in slog
 		if v, ok := h.builtin(slog.Time(slog.TimeKey, r.Time)); ok {
 			parts = append(parts, h.paint(colorDim, consoleTime(v)))
@@ -170,22 +131,17 @@ func (h *consoleHandler) timeAndLevel(parts []string, r Record) []string {
 		parts = append(parts, h.level(v, r.Level))
 	}
 
-	return parts
-}
-
-// journalPriority is the sd-daemon(3) prefix of a level: <7> debug, <6> info,
-// <4> warning, <3> error.
-func journalPriority(l Level) string {
-	switch {
-	case l < slog.LevelInfo:
-		return "<7>"
-	case l < slog.LevelWarn:
-		return "<6>"
-	case l < slog.LevelError:
-		return "<4>"
-	default:
-		return "<3>"
+	if v, ok := h.builtin(slog.String(slog.MessageKey, r.Message)); ok {
+		parts = append(parts, oneLine(v.String()))
 	}
+
+	if attrs := strings.TrimSuffix(h.buf.String(), "\n"); attrs != "" {
+		parts = append(parts, attrs)
+	}
+
+	_, err := io.WriteString(h.out, strings.Join(parts, " ")+"\n")
+
+	return err
 }
 
 // builtin passes a built-in attribute through ReplaceAttr, as the slog

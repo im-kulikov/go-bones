@@ -44,7 +44,6 @@ func Default() *Logger {
 //   - `json`: JSON-formatted logs (default).
 //   - `text`: slog key=value text logs.
 //   - `console`: colored, human-readable lines for local runs.
-//   - `journal`: lines with a syslog priority prefix for journald (systemd).
 //   - a name added with RegisterFormat.
 //
 // Supported levels (see slog.Level): DEBUG, INFO, WARN, ERROR
@@ -125,8 +124,6 @@ func builtinFormat(name string) HandlerConstructor {
 		return func(w io.Writer, o *HandlerOptions) Handler { return slog.NewTextHandler(w, o) }
 	case "console":
 		return NewConsoleHandler
-	case "journal":
-		return newJournalHandler
 	case "", "json":
 		return func(w io.Writer, o *HandlerOptions) Handler { return slog.NewJSONHandler(w, o) }
 	default:
