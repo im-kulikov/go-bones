@@ -54,6 +54,10 @@ step. Full contract: `.github/instructions/logger.instructions.md`.
   the record attributes, so the `builtins` flag (set in `Handle`, cleared at
   msg) keeps user attributes keyed `msg`/`time`/`level`. `WithAttrs` takes
   `mu` because the inner handler runs `ReplaceAttr` there too.
+- So `console` and `journal` render under `mu` (shared buffer and `builtins`):
+  about 1 µs per record whatever the number of goroutines, where text and json
+  scale with cores. Fine for local runs and systemd volumes; removing the lock
+  means formatting attributes without the inner `TextHandler`.
   Line breaks in the message are escaped (`oneLine`): one record, one line;
   attribute values are already quoted by the `TextHandler`.
 - Formats go-bones does not ship are registered by the service with

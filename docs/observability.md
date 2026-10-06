@@ -37,7 +37,7 @@ logger:
 
 **Output**: `LOGGER_FORMAT` is `json` by default — what log collectors expect in production. Use `console` for a colored, human-readable line locally (`NO_COLOR` turns colors off) or `text` for plain `key=value`.
 
-Under systemd, set `LOGGER_FORMAT=journal` (`Environment=LOGGER_FORMAT=journal` in the unit): each line starts with the syslog priority (`<6>` info, `<4>` warning, …) instead of time and level, journald stores it as the entry priority, and `journalctl -p warning` filters by it. The format is never chosen automatically: `JOURNAL_STREAM` is set for any service under systemd, including those whose JSON is shipped on by a collector.
+Under systemd, set `LOGGER_FORMAT=journal` (`Environment=LOGGER_FORMAT=journal` in the unit): each line starts with the syslog priority (`<6>` info, `<4>` warning, …) instead of time and level, journald stores it as the entry priority, and `journalctl -p warning` filters by it. Like `console`, it renders one record at a time (about 1 µs each); a service logging hundreds of thousands of records per second should stay on `json`. The format is never chosen automatically: `JOURNAL_STREAM` is set for any service under systemd, including those whose JSON is shipped on by a collector.
 
 **Your own format**: register it in `main` before `app.Init` (or `logger.Init`), and `LOGGER_FORMAT` picks it like a built-in one. The handler gets the output and the level from the config — pass `opts.Level` on — and sees records after secrets are masked. For example, journald fields (`journalctl USERNAME=ivanov`) with [systemd/slog-journal](https://github.com/systemd/slog-journal):
 

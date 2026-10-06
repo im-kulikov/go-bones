@@ -42,7 +42,8 @@ type consoleHandler struct {
 
 // NewConsoleHandler returns the handler behind LOGGER_FORMAT=console: colored,
 // human-readable lines for local development. Prefer text or json in
-// production, where logs are parsed by machines.
+// production, where logs are parsed by machines; records are also rendered one
+// at a time here, while text and json render them in parallel.
 //
 // As in the slog handlers, opts.ReplaceAttr also gets the time, level and
 // message: a changed value is printed in its place, an empty attribute drops
