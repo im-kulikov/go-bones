@@ -38,9 +38,10 @@ func Default() *Logger {
 // behaviour. Invalid config values do not fail initialization; they fall back to
 // defaults and emit warnings through the current default logger.
 //
-// Supported formats:
-//   - `json`: JSON-formatted logs.
-//   - `text`: human-readable text logs (default).
+// Supported formats (see formatFor):
+//   - `json`: JSON-formatted logs (default).
+//   - `text`: slog key=value text logs.
+//   - `console`: colored, human-readable lines for local runs.
 //
 // Supported levels (see slog.Level): DEBUG, INFO, WARN, ERROR
 //
