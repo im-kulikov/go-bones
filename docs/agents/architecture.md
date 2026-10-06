@@ -89,6 +89,12 @@ the whole application; non-ignored errors are joined into `Run`'s result.
 Exits go through the `exit` variable so tests can replace `os.Exit`. `Add`/`Run`
 before `Init` panic.
 
+`Init` takes only `config.Option` and calls `logger.Init` without options, on
+purpose: a custom log handler is a format (`logger.RegisterFormat`), its
+settings come from env, a sink built by `Add` is bound late
+(`logger/example_multi_test.go`). When a second user needs logger options, add
+`InitWith(...app.Option)` and keep `Init` as a wrapper; not before.
+
 ## Process-wide state
 
 Globals are deliberate and marked `//nolint:gochecknoglobals` with a reason.
@@ -120,7 +126,7 @@ parallel. Prefer a struct field seam over a new global.
 | `--config`, `--help`, `--print-config` | gonfig flags embedded in `config.Base` (`config/alias.go`) |
 | version from VCS without ldflags | `config/config.go` `buildVersion` |
 | secret masking in logs | `logger/secrets.go`, `logger/handlers.go` `redactAttrs` |
-| log formats `json`/`text`/`console`, your own via `RegisterFormat` (journald: examples) | `logger/default.go` `formatFor`, `logger/console.go`, `logger/example_journal_test.go` |
+| log formats `json`/`text`/`console`, your own via `RegisterFormat` (journald, several sinks: examples) | `logger/default.go` `formatFor`, `logger/console.go`, `logger/example_journal_test.go`, `logger/example_multi_test.go` |
 | `trace_id`/`span_id` in log lines | `logger/tracing.go` (only with `logger.open_tracing`) |
 | OTLP logs/metrics/traces | `tracer/tracer.go`, `logger/otel.go` |
 | `/metrics`, pprof, expvar, `/version` ([ops](../ops.md)) | `network/http/ops.go` |

@@ -67,6 +67,11 @@ step. Full contract: `.github/instructions/logger.instructions.md`.
   priority prefix journald reads from stdout) was dropped for this reason; it
   lives on as `logger/example_journal_test.go`, and journald fields go through
   systemd/slog-journal ([Observability](../observability.md#logging)).
+- A format that needs more than `(w, opts)` is a recipe, not an API:
+  `slog.NewMultiHandler` for several sinks, env for settings, late binding for
+  a sink built by `app.Add` (`logger/example_multi_test.go`). A late-bound
+  handler must replay `WithAttrs`/`WithGroup` on the target: `New` calls
+  `WithAttrs` for the `app` group before any component exists.
 
 ## Tests
 
