@@ -147,7 +147,7 @@ Prefer it to a struct literal: `config.Ops{}` has every `*_enabled` switch `fals
 | Key | Env | Default | Description |
 |---|---|---|---|
 | `level` | `LOGGER_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
-| `format` | `LOGGER_FORMAT` | `json` | `json`, `text`, `console` (colored, for local development), or `journal` (stdout read by journald under systemd) |
+| `format` | `LOGGER_FORMAT` | `json` | `json`, `text`, `console` (colored, for local development), `journal` (stdout read by journald under systemd), or a name added with [`logger.RegisterFormat`](observability.md#logging) |
 | `add_source` | `LOGGER_ADD_SOURCE` | `false` | Add file:line to each record |
 | `add_app_info` | `LOGGER_ADD_APP_INFO` | `false` | Add the `app` group with name and version |
 | `open_tracing` | `LOGGER_OPEN_TRACING_ENABLED` | `false` | Add the `trace` group (`trace_id`, `span_id`) to records logged with a traced context, and mirror them as span events when OTLP log export is off |

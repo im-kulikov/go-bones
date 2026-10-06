@@ -99,6 +99,7 @@ parallel. Prefer a struct field seam over a new global.
 |---|---|---|
 | application `std`, `exit` seam | `app/app.go` | `app.Init`, tests |
 | default logger (`atomic.Pointer`) | `logger/default.go` | `logger.Init` |
+| log format registry (`sync.Map`) | `logger/default.go` | `logger.RegisterFormat`, from `main` |
 | OTel log bridge switch | `logger/otel.go` | `tracer` via `logger.SetOpenTelemetryBridge` |
 | Prometheus registry, runtime collector flag | `network/http/ops.go` | `RegisterMetrics`, `NewOPSServer` |
 | OTel tracer/meter/logger providers, propagator | OTel globals | `tracer.Init` |
@@ -119,7 +120,7 @@ parallel. Prefer a struct field seam over a new global.
 | `--config`, `--help`, `--print-config` | gonfig flags embedded in `config.Base` (`config/alias.go`) |
 | version from VCS without ldflags | `config/config.go` `buildVersion` |
 | secret masking in logs | `logger/secrets.go`, `logger/handlers.go` `redactAttrs` |
-| log formats `json`/`text`/`console`/`journal` | `logger/default.go` `formatFor`, `logger/console.go` |
+| log formats `json`/`text`/`console`/`journal`, your own via `RegisterFormat` | `logger/default.go` `formatFor`, `logger/console.go` |
 | `trace_id`/`span_id` in log lines | `logger/tracing.go` (only with `logger.open_tracing`) |
 | OTLP logs/metrics/traces | `tracer/tracer.go`, `logger/otel.go` |
 | `/metrics`, pprof, expvar, `/version` ([ops](../ops.md)) | `network/http/ops.go` |

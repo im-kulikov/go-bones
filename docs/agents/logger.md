@@ -11,7 +11,7 @@ User view: [Observability › Logging](../observability.md#logging).
 |---|---|
 | `logger/doc.go` | package godoc |
 | `logger/attributes.go` | type aliases to `slog` (`Logger`, `Attr`, `Handler`, …) and attr helpers (`String`, `Err`, `NamedError`, …) |
-| `logger/default.go` | process default logger, `Init(cfg)`, `Default()`, package-level `Info`/`Error`/…, `formatFor` |
+| `logger/default.go` | process default logger, `Init(cfg)`, `Default()`, package-level `Info`/`Error`/…, `formatFor`, `RegisterFormat` |
 | `logger/logger.go` | `New`, `prepareTransformers` (the pipeline), `applyHandler` (`app` group) |
 | `logger/handlers.go` | `wrappedHandler` (runs transformers, `Named` prefixes, `redactAttrs` for `With`), `Named` |
 | `logger/options.go` | `Option`s for `Init`: level, output, handler, transformers, source |
@@ -56,6 +56,12 @@ step. Full contract: `.github/instructions/logger.instructions.md`.
   `mu` because the inner handler runs `ReplaceAttr` there too.
   Line breaks in the message are escaped (`oneLine`): one record, one line;
   attribute values are already quoted by the `TextHandler`.
+- Formats go-bones does not ship are registered by the service with
+  `RegisterFormat` before `Init` (a `sync.Map`; built-in names, duplicates and
+  a nil constructor panic). The registered handler is the final one behind
+  the pipeline, like the built-ins. Do not add more built-in formats for one
+  user: point them to `RegisterFormat` (journald fields: systemd/slog-journal,
+  example in [Observability](../observability.md#logging)).
 - `journal` is the console handler with `journal` set: no colors, no time or
   level, the `<N>` priority glued to the line with no space (journald would
   keep the space in MESSAGE). Never picked from `JOURNAL_STREAM`: that would

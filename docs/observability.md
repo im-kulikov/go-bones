@@ -39,6 +39,56 @@ logger:
 
 Under systemd, set `LOGGER_FORMAT=journal` (`Environment=LOGGER_FORMAT=journal` in the unit): each line starts with the syslog priority (`<6>` info, `<4>` warning, …) instead of time and level, journald stores it as the entry priority, and `journalctl -p warning` filters by it. The format is never chosen automatically: `JOURNAL_STREAM` is set for any service under systemd, including those whose JSON is shipped on by a collector.
 
+**Your own format**: register it in `main` before `app.Init` (or `logger.Init`), and `LOGGER_FORMAT` picks it like a built-in one. The handler gets the output and the level from the config — pass `opts.Level` on — and sees records after secrets are masked. For example, journald fields (`journalctl USERNAME=ivanov`) with [systemd/slog-journal](https://github.com/systemd/slog-journal):
+
+```go
+logger.RegisterFormat("journald", func(w io.Writer, opts *slog.HandlerOptions) slog.Handler {
+	if _, err := os.Stat("/run/systemd/journal/socket"); err != nil {
+		return slog.NewTextHandler(w, opts) // no journald: a container, a laptop
+	}
+
+	h, err := slogjournal.NewHandler(&slogjournal.Options{
+		Level:        opts.Level,
+		ReplaceGroup: journalKey,
+		ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
+			a.Key = journalKey(a.Key)
+			return a
+		},
+	})
+	if err != nil {
+		return slog.NewTextHandler(w, opts)
+	}
+
+	return h
+})
+
+cfg := app.Init[Config]() // LOGGER_FORMAT=journald
+```
+
+```go
+// journalKey maps a slog key to a journal field name: journald keeps only
+// A-Z, 0-9 and _ and silently drops other keys, even "username".
+func journalKey(key string) string {
+	key = strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z':
+			return r - 'a' + 'A'
+		case r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			return r
+		}
+		return '_'
+	}, key)
+
+	if key == "MESSAGE" || key == "PRIORITY" { // the entry's own fields
+		return "X_" + key
+	}
+
+	return key
+}
+```
+
+slog-journal puts only the message into `MESSAGE`, so a plain `journalctl` shows `login failed` and the attributes are in `journalctl -o verbose` or `-o json`. Built-in names cannot be replaced; registering one, or a name twice, panics.
+
 ## OpenTelemetry
 
 ```go

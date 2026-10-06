@@ -3,6 +3,7 @@ package logger
 import (
 	"bytes"
 	"context"
+	"io"
 	"log/slog"
 	"slices"
 	"strings"
@@ -165,4 +166,22 @@ func TestLogger_fromConfig(t *testing.T) {
 			require.NotPanics(t, func() { Init(cfg) })
 		}
 	})
+}
+
+func TestRegisterFormat(t *testing.T) {
+	var built bool
+	ctor := func(w io.Writer, o *HandlerOptions) Handler {
+		built = true
+
+		return slog.NewTextHandler(w, o)
+	}
+
+	RegisterFormat("test-registered", ctor)
+	t.Cleanup(func() { formats.Delete("test-registered") })
+	formatFor("test-registered")(io.Discard, nil)
+	require.True(t, built, "a registered format is picked by name")
+
+	require.Panics(t, func() { RegisterFormat("test-registered", ctor) }, "twice")
+	require.Panics(t, func() { RegisterFormat("journal", ctor) }, "built-in")
+	require.Panics(t, func() { RegisterFormat("test-nil", nil) }, "nil")
 }
