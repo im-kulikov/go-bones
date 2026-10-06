@@ -9,7 +9,7 @@ import (
 )
 
 func TestHealth_WithDefaults(t *testing.T) {
-	cfg := Health{DrainDelay: -1, StaleAfter: -1}.WithDefaults()
+	cfg := Health{DrainDelay: -1, StaleAfter: -1, StartPeriod: -1}.WithDefaults()
 	require.Equal(t, DefaultHealthInterval, cfg.Interval)
 	require.Equal(t, DefaultHealthInitialInterval, cfg.InitialInterval)
 	require.Equal(t, DefaultHealthTimeout, cfg.Timeout)
@@ -19,6 +19,7 @@ func TestHealth_WithDefaults(t *testing.T) {
 	require.Equal(t, 1, cfg.SuccessThreshold)
 	require.Zero(t, cfg.DrainDelay)
 	require.Zero(t, cfg.StaleAfter)
+	require.Zero(t, cfg.StartPeriod)
 
 	custom := Health{Interval: time.Minute, DrainDelay: 5 * time.Second}.WithDefaults()
 	require.Equal(t, time.Minute, custom.Interval)

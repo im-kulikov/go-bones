@@ -63,25 +63,15 @@ func (h Health) WithDefaults() Health {
 		h.MinInterval = DefaultHealthMinInterval
 	}
 
-	if h.FailureThreshold < 1 {
-		h.FailureThreshold = 1
-	}
-
-	if h.SuccessThreshold < 1 {
-		h.SuccessThreshold = 1
-	}
-
 	if h.LogRepeatInterval <= 0 {
 		h.LogRepeatInterval = DefaultHealthLogRepeatInterval
 	}
 
-	if h.DrainDelay < 0 {
-		h.DrainDelay = 0
-	}
-
-	if h.StaleAfter < 0 {
-		h.StaleAfter = 0
-	}
+	h.FailureThreshold = max(h.FailureThreshold, 1)
+	h.SuccessThreshold = max(h.SuccessThreshold, 1)
+	h.DrainDelay = max(h.DrainDelay, 0)
+	h.StaleAfter = max(h.StaleAfter, 0)
+	h.StartPeriod = max(h.StartPeriod, 0)
 
 	return h
 }
