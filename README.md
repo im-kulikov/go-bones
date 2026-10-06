@@ -91,7 +91,7 @@ A real service adds one line per component, in dependency order. Components find
 ```go
 app.Add(cfg.DB, postgres.New)   // returns *pgxpool.Pool
 app.Add(cfg.Orders, orders.New) // service.Get[*pgxpool.Pool](env)
-app.Add(cfg.API, api.New)       // service.Get[*orders.Service](env)
+app.Add(cfg.API, api.New)       // service.Get[orders.Service](env)
 ```
 
 That's it. You now have JSON logs, `/livez` `/readyz` `/healthz`, Prometheus metrics, pprof, OpenTelemetry (off until you set `OTEL_ENABLED=true`), `--config`, `--help` and `--print-config`, and a Kubernetes-friendly shutdown.
